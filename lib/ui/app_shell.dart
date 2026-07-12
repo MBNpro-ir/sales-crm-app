@@ -98,17 +98,14 @@ class _AppShellState extends State<AppShell> {
       store: widget.store,
       collapsed: compact ? false : widget.store.sidebarCollapsed,
       onSelect: (index) => _selectPage(index, closeDrawer: compact),
-      onToggle: () =>
-          widget.store.setSidebarCollapsed(!widget.store.sidebarCollapsed),
     );
     return Scaffold(
       key: _scaffoldKey,
-      endDrawer: compact ? Drawer(width: 292, child: sidebar) : null,
+      drawer: compact ? Drawer(width: 292, child: sidebar) : null,
       body: Directionality(
         textDirection: TextDirection.ltr,
         child: Row(
           children: [
-            if (!compact) sidebar,
             Expanded(
               child: Directionality(
                 textDirection: TextDirection.rtl,
@@ -116,8 +113,9 @@ class _AppShellState extends State<AppShell> {
                   children: [
                     _TopBar(
                       store: widget.store,
+                      sidebarCollapsed: widget.store.sidebarCollapsed,
                       onMenuPressed: compact
-                          ? () => _scaffoldKey.currentState?.openEndDrawer()
+                          ? () => _scaffoldKey.currentState?.openDrawer()
                           : () => widget.store.setSidebarCollapsed(
                               !widget.store.sidebarCollapsed,
                             ),
@@ -135,6 +133,7 @@ class _AppShellState extends State<AppShell> {
                 ),
               ),
             ),
+            if (!compact) sidebar,
           ],
         ),
       ),
@@ -145,11 +144,13 @@ class _AppShellState extends State<AppShell> {
 class _TopBar extends StatelessWidget {
   const _TopBar({
     required this.store,
+    required this.sidebarCollapsed,
     required this.onMenuPressed,
     required this.compact,
   });
 
   final CrmStore store;
+  final bool sidebarCollapsed;
   final VoidCallback onMenuPressed;
   final bool compact;
 
@@ -179,7 +180,11 @@ class _TopBar extends StatelessWidget {
                 onPressed: onMenuPressed,
                 tooltip: compact ? 'منو' : 'جمع یا باز کردن منو',
                 icon: Icon(
-                  compact ? Icons.menu_rounded : Icons.menu_open_rounded,
+                  compact
+                      ? Icons.menu_rounded
+                      : sidebarCollapsed
+                      ? Icons.keyboard_double_arrow_left_rounded
+                      : Icons.keyboard_double_arrow_right_rounded,
                 ),
               ),
             ),
@@ -254,7 +259,6 @@ class _Sidebar extends StatelessWidget {
     required this.store,
     required this.collapsed,
     required this.onSelect,
-    required this.onToggle,
   });
 
   final int selectedIndex;
@@ -262,7 +266,6 @@ class _Sidebar extends StatelessWidget {
   final CrmStore store;
   final bool collapsed;
   final ValueChanged<int> onSelect;
-  final VoidCallback onToggle;
 
   @override
   Widget build(BuildContext context) {
@@ -319,26 +322,10 @@ class _Sidebar extends StatelessWidget {
                             ),
                           ),
                         ),
-                        IconButton(
-                          onPressed: onToggle,
-                          tooltip: 'جمع کردن منو',
-                          color: const Color(0xffbfd0e8),
-                          icon: const Icon(Icons.first_page_rounded),
-                        ),
                       ],
                     ],
                   ),
                 ),
-                if (collapsed)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 8),
-                    child: IconButton(
-                      onPressed: onToggle,
-                      tooltip: 'باز کردن منو',
-                      color: const Color(0xffbfd0e8),
-                      icon: const Icon(Icons.last_page_rounded),
-                    ),
-                  ),
                 const Divider(color: Color(0x337f9ac3), height: 1),
                 const SizedBox(height: 8),
                 Expanded(
@@ -350,29 +337,49 @@ class _Sidebar extends StatelessWidget {
                     itemBuilder: (context, index) {
                       final item = items[index];
                       final selected = index == selectedIndex;
-                      final tile = Material(
-                        color: Colors.transparent,
-                        borderRadius: BorderRadius.circular(12),
-                        clipBehavior: Clip.antiAlias,
-                        child: ListTile(
-                          selected: selected,
-                          selectedTileColor: colors.primary,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          contentPadding: EdgeInsets.symmetric(
-                            horizontal: collapsed ? 0 : 12,
-                          ),
-                          minLeadingWidth: 28,
-                          leading: Icon(
-                            item.icon,
-                            color: selected
-                                ? Colors.white
-                                : const Color(0xffbfd0e8),
-                          ),
-                          title: collapsed
-                              ? null
-                              : Text(
+                      final tile = collapsed
+                          ? Material(
+                              color: selected
+                                  ? colors.primary
+                                  : Colors.transparent,
+                              borderRadius: BorderRadius.circular(12),
+                              clipBehavior: Clip.antiAlias,
+                              child: InkWell(
+                                onTap: () => onSelect(index),
+                                child: SizedBox(
+                                  height: 52,
+                                  child: Center(
+                                    child: Icon(
+                                      item.icon,
+                                      color: selected
+                                          ? Colors.white
+                                          : const Color(0xffbfd0e8),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            )
+                          : Material(
+                              color: Colors.transparent,
+                              borderRadius: BorderRadius.circular(12),
+                              clipBehavior: Clip.antiAlias,
+                              child: ListTile(
+                                selected: selected,
+                                selectedTileColor: colors.primary,
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                contentPadding: const EdgeInsets.symmetric(
+                                  horizontal: 12,
+                                ),
+                                minLeadingWidth: 28,
+                                leading: Icon(
+                                  item.icon,
+                                  color: selected
+                                      ? Colors.white
+                                      : const Color(0xffbfd0e8),
+                                ),
+                                title: Text(
                                   item.label,
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
@@ -385,9 +392,9 @@ class _Sidebar extends StatelessWidget {
                                         : FontWeight.w500,
                                   ),
                                 ),
-                          onTap: () => onSelect(index),
-                        ),
-                      );
+                                onTap: () => onSelect(index),
+                              ),
+                            );
                       return Padding(
                         padding: const EdgeInsets.symmetric(vertical: 3),
                         child: collapsed

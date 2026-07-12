@@ -17,7 +17,7 @@ void main() {
     expect(find.text('فروش‌یار CRM'), findsOneWidget);
   });
 
-  testWidgets('sidebar ListTiles have a Material paint ancestor', (
+  testWidgets('sidebar is right-aligned and has one safe menu control', (
     tester,
   ) async {
     tester.view.physicalSize = const Size(1400, 900);
@@ -28,6 +28,8 @@ void main() {
     await tester.pumpWidget(MaterialApp(home: AppShell(store: CrmStore())));
 
     expect(find.byType(ListTile), findsWidgets);
+    expect(tester.getTopLeft(find.text('فروش‌یار CRM')).dx, greaterThan(1100));
+    expect(find.byTooltip('جمع یا باز کردن منو'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 }
