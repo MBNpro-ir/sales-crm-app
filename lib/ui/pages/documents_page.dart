@@ -21,9 +21,11 @@ class DocumentsPage extends StatelessWidget {
 
   Future<void> _openEditor(BuildContext context) async {
     if (store.customers.isEmpty) {
-      ScaffoldMessenger.of(
+      showCrmNotice(
         context,
-      ).showSnackBar(const SnackBar(content: Text('ابتدا یک مشتری ثبت کنید.')));
+        'ابتدا یک مشتری ثبت کنید.',
+        type: CrmNoticeType.warning,
+      );
       return;
     }
     final saved = await showDialog<bool>(
@@ -31,10 +33,10 @@ class DocumentsPage extends StatelessWidget {
       builder: (context) => _DocumentEditor(store: store, mode: mode),
     );
     if (saved == true && context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(_isQuote ? 'پیش‌فاکتور ثبت شد.' : 'سفارش ثبت شد.'),
-        ),
+      showCrmNotice(
+        context,
+        _isQuote ? 'پیش‌فاکتور ثبت شد.' : 'سفارش ثبت شد.',
+        type: CrmNoticeType.success,
       );
     }
   }
@@ -394,15 +396,19 @@ class _DocumentEditorState extends State<_DocumentEditor> {
                 ),
                 SizedBox(
                   width: 258,
-                  child: TextFormField(
+                  child: AutoInputDirection(
                     controller: _amount,
-                    keyboardType: TextInputType.number,
-                    decoration: const InputDecoration(
-                      labelText: 'مبلغ کل (تومان) *',
+                    child: TextFormField(
+                      controller: _amount,
+                      keyboardType: TextInputType.number,
+                      decoration: const InputDecoration(
+                        labelText: 'مبلغ کل (تومان) *',
+                      ),
+                      validator: (value) =>
+                          value == null || value.trim().isEmpty
+                          ? 'مبلغ را وارد کنید.'
+                          : null,
                     ),
-                    validator: (value) => value == null || value.trim().isEmpty
-                        ? 'مبلغ را وارد کنید.'
-                        : null,
                   ),
                 ),
                 if (_isQuote)
@@ -420,13 +426,16 @@ class _DocumentEditorState extends State<_DocumentEditor> {
                   ),
                 SizedBox(
                   width: double.infinity,
-                  child: TextFormField(
+                  child: AutoInputDirection(
                     controller: _notes,
-                    minLines: 3,
-                    maxLines: 4,
-                    decoration: const InputDecoration(
-                      labelText: 'یادداشت',
-                      alignLabelWithHint: true,
+                    child: TextFormField(
+                      controller: _notes,
+                      minLines: 3,
+                      maxLines: 4,
+                      decoration: const InputDecoration(
+                        labelText: 'یادداشت',
+                        alignLabelWithHint: true,
+                      ),
                     ),
                   ),
                 ),

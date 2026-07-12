@@ -14,9 +14,7 @@ class ProductsPage extends StatelessWidget {
       builder: (context) => _ProductEditor(store: store),
     );
     if (saved == true && context.mounted) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('محصول ثبت شد.')));
+      showCrmNotice(context, 'محصول ثبت شد.', type: CrmNoticeType.success);
     }
   }
 
@@ -250,72 +248,101 @@ class _ProductEditorState extends State<_ProductEditor> {
               children: [
                 SizedBox(
                   width: 280,
-                  child: TextFormField(
+                  child: AutoInputDirection(
                     controller: _name,
-                    decoration: const InputDecoration(labelText: 'نام محصول *'),
-                    validator: (value) => value == null || value.trim().isEmpty
-                        ? 'نام محصول الزامی است.'
-                        : null,
-                  ),
-                ),
-                SizedBox(
-                  width: 280,
-                  child: TextFormField(
-                    controller: _sku,
-                    decoration: const InputDecoration(labelText: 'کد محصول'),
-                  ),
-                ),
-                SizedBox(
-                  width: 280,
-                  child: TextFormField(
-                    controller: _category,
-                    decoration: const InputDecoration(labelText: 'دسته‌بندی'),
-                  ),
-                ),
-                SizedBox(
-                  width: 280,
-                  child: TextFormField(
-                    controller: _unit,
-                    decoration: const InputDecoration(labelText: 'واحد'),
-                  ),
-                ),
-                SizedBox(
-                  width: 280,
-                  child: TextFormField(
-                    controller: _price,
-                    keyboardType: TextInputType.number,
-                    decoration: const InputDecoration(
-                      labelText: 'قیمت پایه (تومان)',
+                    child: TextFormField(
+                      controller: _name,
+                      decoration: const InputDecoration(
+                        labelText: 'نام محصول *',
+                      ),
+                      validator: (value) =>
+                          value == null || value.trim().isEmpty
+                          ? 'نام محصول الزامی است.'
+                          : null,
                     ),
                   ),
                 ),
                 SizedBox(
                   width: 280,
-                  child: TextFormField(
-                    controller: _stock,
-                    keyboardType: TextInputType.number,
-                    decoration: const InputDecoration(labelText: 'موجودی فعلی'),
+                  child: AutoInputDirection(
+                    controller: _sku,
+                    child: TextFormField(
+                      controller: _sku,
+                      decoration: const InputDecoration(labelText: 'کد محصول'),
+                    ),
                   ),
                 ),
                 SizedBox(
                   width: 280,
-                  child: TextFormField(
+                  child: AutoInputDirection(
+                    controller: _category,
+                    child: TextFormField(
+                      controller: _category,
+                      decoration: const InputDecoration(labelText: 'دسته‌بندی'),
+                    ),
+                  ),
+                ),
+                SizedBox(
+                  width: 280,
+                  child: AutoInputDirection(
+                    controller: _unit,
+                    child: TextFormField(
+                      controller: _unit,
+                      decoration: const InputDecoration(labelText: 'واحد'),
+                    ),
+                  ),
+                ),
+                SizedBox(
+                  width: 280,
+                  child: AutoInputDirection(
+                    controller: _price,
+                    child: TextFormField(
+                      controller: _price,
+                      keyboardType: TextInputType.number,
+                      decoration: const InputDecoration(
+                        labelText: 'قیمت پایه (تومان)',
+                      ),
+                    ),
+                  ),
+                ),
+                SizedBox(
+                  width: 280,
+                  child: AutoInputDirection(
+                    controller: _stock,
+                    child: TextFormField(
+                      controller: _stock,
+                      keyboardType: TextInputType.number,
+                      decoration: const InputDecoration(
+                        labelText: 'موجودی فعلی',
+                      ),
+                    ),
+                  ),
+                ),
+                SizedBox(
+                  width: 280,
+                  child: AutoInputDirection(
                     controller: _minStock,
-                    keyboardType: TextInputType.number,
-                    decoration: const InputDecoration(
-                      labelText: 'حداقل موجودی',
+                    child: TextFormField(
+                      controller: _minStock,
+                      keyboardType: TextInputType.number,
+                      decoration: const InputDecoration(
+                        labelText: 'حداقل موجودی',
+                      ),
                     ),
                   ),
                 ),
                 SizedBox(
                   width: double.infinity,
-                  child: TextFormField(
+                  child: AutoInputDirection(
                     controller: _description,
-                    minLines: 3,
-                    maxLines: 4,
-                    decoration: const InputDecoration(
-                      labelText: 'توضیحات',
-                      alignLabelWithHint: true,
+                    child: TextFormField(
+                      controller: _description,
+                      minLines: 3,
+                      maxLines: 4,
+                      decoration: const InputDecoration(
+                        labelText: 'توضیحات',
+                        alignLabelWithHint: true,
+                      ),
                     ),
                   ),
                 ),

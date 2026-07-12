@@ -12,9 +12,11 @@ class TasksPage extends StatelessWidget {
 
   Future<void> _openEditor(BuildContext context) async {
     if (store.customers.isEmpty) {
-      ScaffoldMessenger.of(
+      showCrmNotice(
         context,
-      ).showSnackBar(const SnackBar(content: Text('ابتدا یک مشتری ثبت کنید.')));
+        'ابتدا یک مشتری ثبت کنید.',
+        type: CrmNoticeType.warning,
+      );
       return;
     }
     final saved = await showDialog<bool>(
@@ -22,9 +24,7 @@ class TasksPage extends StatelessWidget {
       builder: (context) => _TaskEditor(store: store),
     );
     if (saved == true && context.mounted) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('وظیفه ثبت شد.')));
+      showCrmNotice(context, 'وظیفه ثبت شد.', type: CrmNoticeType.success);
     }
   }
 
@@ -303,14 +303,18 @@ class _TaskEditorState extends State<_TaskEditor> {
                 ),
                 SizedBox(
                   width: double.infinity,
-                  child: TextFormField(
+                  child: AutoInputDirection(
                     controller: _title,
-                    decoration: const InputDecoration(
-                      labelText: 'عنوان وظیفه *',
+                    child: TextFormField(
+                      controller: _title,
+                      decoration: const InputDecoration(
+                        labelText: 'عنوان وظیفه *',
+                      ),
+                      validator: (value) =>
+                          value == null || value.trim().isEmpty
+                          ? 'عنوان الزامی است.'
+                          : null,
                     ),
-                    validator: (value) => value == null || value.trim().isEmpty
-                        ? 'عنوان الزامی است.'
-                        : null,
                   ),
                 ),
                 SizedBox(
@@ -367,13 +371,16 @@ class _TaskEditorState extends State<_TaskEditor> {
                 ),
                 SizedBox(
                   width: double.infinity,
-                  child: TextFormField(
+                  child: AutoInputDirection(
                     controller: _notes,
-                    minLines: 3,
-                    maxLines: 4,
-                    decoration: const InputDecoration(
-                      labelText: 'توضیحات',
-                      alignLabelWithHint: true,
+                    child: TextFormField(
+                      controller: _notes,
+                      minLines: 3,
+                      maxLines: 4,
+                      decoration: const InputDecoration(
+                        labelText: 'توضیحات',
+                        alignLabelWithHint: true,
+                      ),
                     ),
                   ),
                 ),

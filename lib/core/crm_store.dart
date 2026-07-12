@@ -8,6 +8,8 @@ import 'models.dart';
 
 enum CrmAccent { ocean, emerald, violet, amber, rose }
 
+enum CloseBehavior { ask, minimizeToTray, exit }
+
 class CrmStore extends ChangeNotifier {
   CrmStore({LocalDatabase? database, ApiClient? api})
     : _database = database ?? LocalDatabase(),
@@ -26,6 +28,7 @@ class CrmStore extends ChangeNotifier {
   bool _boldText = false;
   bool _largeTouchTargets = false;
   bool _sidebarCollapsed = false;
+  CloseBehavior _closeBehavior = CloseBehavior.ask;
   List<CrmCustomer> _customers = const [];
   List<CrmCall> _calls = const [];
   List<CrmProduct> _products = const [];
@@ -50,6 +53,7 @@ class CrmStore extends ChangeNotifier {
   bool get boldText => _boldText;
   bool get largeTouchTargets => _largeTouchTargets;
   bool get sidebarCollapsed => _sidebarCollapsed;
+  CloseBehavior get closeBehavior => _closeBehavior;
   List<CrmCustomer> get customers => List.unmodifiable(_customers);
   List<CrmCall> get calls => List.unmodifiable(_calls);
   List<CrmProduct> get products => List.unmodifiable(_products);
@@ -123,6 +127,11 @@ class CrmStore extends ChangeNotifier {
     _boldText = _preferences!.getBool('bold_text') ?? false;
     _largeTouchTargets = _preferences!.getBool('large_touch_targets') ?? false;
     _sidebarCollapsed = _preferences!.getBool('sidebar_collapsed') ?? false;
+    final savedCloseBehavior = _preferences!.getString('close_behavior');
+    _closeBehavior = CloseBehavior.values.firstWhere(
+      (item) => item.name == savedCloseBehavior,
+      orElse: () => CloseBehavior.ask,
+    );
     _accessToken = _preferences!.getString('access_token');
     _api.accessToken = _accessToken;
     _userName = _preferences!.getString('user_name') ?? _userName;
@@ -200,6 +209,12 @@ class CrmStore extends ChangeNotifier {
   Future<void> setSidebarCollapsed(bool value) async {
     _sidebarCollapsed = value;
     await _preferences?.setBool('sidebar_collapsed', value);
+    notifyListeners();
+  }
+
+  Future<void> setCloseBehavior(CloseBehavior value) async {
+    _closeBehavior = value;
+    await _preferences?.setString('close_behavior', value.name);
     notifyListeners();
   }
 

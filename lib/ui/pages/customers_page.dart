@@ -27,8 +27,10 @@ class _CustomersPageState extends State<CustomersPage> {
       builder: (context) => _CustomerEditorDialog(store: widget.store),
     );
     if (!mounted || saved != true) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('مشتری در داده‌های محلی ثبت شد.')),
+    showCrmNotice(
+      context,
+      'مشتری در داده‌های محلی ثبت شد.',
+      type: CrmNoticeType.success,
     );
   }
 
@@ -59,12 +61,15 @@ class _CustomersPageState extends State<CustomersPage> {
         const SizedBox(height: 22),
         SectionCard(
           title: 'جست‌وجو و فیلتر',
-          child: TextField(
+          child: AutoInputDirection(
             controller: _search,
-            onChanged: (_) => setState(() {}),
-            decoration: const InputDecoration(
-              hintText: 'نام، شرکت، موبایل یا شهر را وارد کنید',
-              prefixIcon: Icon(Icons.search_rounded),
+            child: TextField(
+              controller: _search,
+              onChanged: (_) => setState(() {}),
+              decoration: const InputDecoration(
+                hintText: 'نام، شرکت، موبایل یا شهر را وارد کنید',
+                prefixIcon: Icon(Icons.search_rounded),
+              ),
             ),
           ),
         ),
@@ -253,7 +258,8 @@ class _CustomerEditorDialogState extends State<_CustomerEditorDialog> {
               spacing: 12,
               runSpacing: 12,
               children: [
-                _wideField(
+                _input(
+                  _name,
                   TextFormField(
                     controller: _name,
                     decoration: const InputDecoration(
@@ -265,7 +271,8 @@ class _CustomerEditorDialogState extends State<_CustomerEditorDialog> {
                         : null,
                   ),
                 ),
-                _wideField(
+                _input(
+                  _company,
                   TextFormField(
                     controller: _company,
                     decoration: const InputDecoration(
@@ -274,7 +281,8 @@ class _CustomerEditorDialogState extends State<_CustomerEditorDialog> {
                     ),
                   ),
                 ),
-                _wideField(
+                _input(
+                  _mobile,
                   TextFormField(
                     controller: _mobile,
                     keyboardType: TextInputType.phone,
@@ -287,7 +295,8 @@ class _CustomerEditorDialogState extends State<_CustomerEditorDialog> {
                         : null,
                   ),
                 ),
-                _wideField(
+                _input(
+                  _phone,
                   TextFormField(
                     controller: _phone,
                     keyboardType: TextInputType.phone,
@@ -297,7 +306,8 @@ class _CustomerEditorDialogState extends State<_CustomerEditorDialog> {
                     ),
                   ),
                 ),
-                _wideField(
+                _input(
+                  _email,
                   TextFormField(
                     controller: _email,
                     keyboardType: TextInputType.emailAddress,
@@ -307,7 +317,8 @@ class _CustomerEditorDialogState extends State<_CustomerEditorDialog> {
                     ),
                   ),
                 ),
-                _wideField(
+                _input(
+                  _secondaryMobile,
                   TextFormField(
                     controller: _secondaryMobile,
                     keyboardType: TextInputType.phone,
@@ -317,7 +328,8 @@ class _CustomerEditorDialogState extends State<_CustomerEditorDialog> {
                     ),
                   ),
                 ),
-                _wideField(
+                _input(
+                  _nationalId,
                   TextFormField(
                     controller: _nationalId,
                     keyboardType: TextInputType.number,
@@ -326,13 +338,15 @@ class _CustomerEditorDialogState extends State<_CustomerEditorDialog> {
                     ),
                   ),
                 ),
-                _wideField(
+                _input(
+                  _province,
                   TextFormField(
                     controller: _province,
                     decoration: const InputDecoration(labelText: 'استان'),
                   ),
                 ),
-                _wideField(
+                _input(
+                  _city,
                   TextFormField(
                     controller: _city,
                     decoration: const InputDecoration(labelText: 'شهر'),
@@ -419,13 +433,15 @@ class _CustomerEditorDialogState extends State<_CustomerEditorDialog> {
                     ),
                   ),
                 ),
-                _wideField(
+                _input(
+                  _source,
                   TextFormField(
                     controller: _source,
                     decoration: const InputDecoration(labelText: 'منبع آشنایی'),
                   ),
                 ),
-                _wideField(
+                _input(
+                  _interestedProducts,
                   TextFormField(
                     controller: _interestedProducts,
                     decoration: const InputDecoration(
@@ -433,7 +449,8 @@ class _CustomerEditorDialogState extends State<_CustomerEditorDialog> {
                     ),
                   ),
                 ),
-                _wideField(
+                _input(
+                  _monthlyVolume,
                   TextFormField(
                     controller: _monthlyVolume,
                     keyboardType: TextInputType.number,
@@ -442,7 +459,8 @@ class _CustomerEditorDialogState extends State<_CustomerEditorDialog> {
                     ),
                   ),
                 ),
-                _wideField(
+                _input(
+                  _paymentTerms,
                   TextFormField(
                     controller: _paymentTerms,
                     decoration: const InputDecoration(
@@ -450,7 +468,8 @@ class _CustomerEditorDialogState extends State<_CustomerEditorDialog> {
                     ),
                   ),
                 ),
-                _wideField(
+                _input(
+                  _district,
                   TextFormField(
                     controller: _district,
                     decoration: const InputDecoration(
@@ -458,7 +477,8 @@ class _CustomerEditorDialogState extends State<_CustomerEditorDialog> {
                     ),
                   ),
                 ),
-                _wideField(
+                _input(
+                  _postalCode,
                   TextFormField(
                     controller: _postalCode,
                     keyboardType: TextInputType.number,
@@ -467,24 +487,29 @@ class _CustomerEditorDialogState extends State<_CustomerEditorDialog> {
                 ),
                 SizedBox(
                   width: double.infinity,
-                  child: TextFormField(
+                  child: AutoInputDirection(
                     controller: _address,
-                    minLines: 2,
-                    maxLines: 3,
-                    decoration: const InputDecoration(
-                      labelText: 'آدرس کامل',
-                      alignLabelWithHint: true,
+                    child: TextFormField(
+                      controller: _address,
+                      minLines: 2,
+                      maxLines: 3,
+                      decoration: const InputDecoration(
+                        labelText: 'آدرس کامل',
+                        alignLabelWithHint: true,
+                      ),
                     ),
                   ),
                 ),
-                _wideField(
+                _input(
+                  _fax,
                   TextFormField(
                     controller: _fax,
                     keyboardType: TextInputType.phone,
                     decoration: const InputDecoration(labelText: 'فکس'),
                   ),
                 ),
-                _wideField(
+                _input(
+                  _website,
                   TextFormField(
                     controller: _website,
                     keyboardType: TextInputType.url,
@@ -493,13 +518,16 @@ class _CustomerEditorDialogState extends State<_CustomerEditorDialog> {
                 ),
                 SizedBox(
                   width: double.infinity,
-                  child: TextFormField(
+                  child: AutoInputDirection(
                     controller: _notes,
-                    minLines: 3,
-                    maxLines: 4,
-                    decoration: const InputDecoration(
-                      labelText: 'یادداشت',
-                      alignLabelWithHint: true,
+                    child: TextFormField(
+                      controller: _notes,
+                      minLines: 3,
+                      maxLines: 4,
+                      decoration: const InputDecoration(
+                        labelText: 'یادداشت',
+                        alignLabelWithHint: true,
+                      ),
                     ),
                   ),
                 ),
@@ -530,5 +558,9 @@ class _CustomerEditorDialogState extends State<_CustomerEditorDialog> {
 
   Widget _wideField(Widget child) {
     return SizedBox(width: 294, child: child);
+  }
+
+  Widget _input(TextEditingController controller, Widget child) {
+    return _wideField(AutoInputDirection(controller: controller, child: child));
   }
 }

@@ -14,6 +14,7 @@ import 'pages/products_page.dart';
 import 'pages/reports_page.dart';
 import 'pages/settings_page.dart';
 import 'pages/tasks_page.dart';
+import 'widgets/common.dart';
 
 class AppShell extends StatefulWidget {
   const AppShell({super.key, required this.store});
@@ -126,7 +127,10 @@ class _AppShellState extends State<AppShell> {
                         padding: EdgeInsets.all(
                           widget.store.largeTouchTargets ? 28 : 24,
                         ),
-                        child: _page(),
+                        child: SoftPageSwitcher(
+                          pageId: _selectedIndex,
+                          child: _page(),
+                        ),
                       ),
                     ),
                   ],
@@ -227,8 +231,12 @@ class _TopBar extends StatelessWidget {
                     : () async {
                         await store.sync();
                         if (!context.mounted) return;
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(content: Text(store.syncMessage)),
+                        showCrmNotice(
+                          context,
+                          store.syncMessage,
+                          type: store.online
+                              ? CrmNoticeType.success
+                              : CrmNoticeType.warning,
                         );
                       },
                 icon: store.syncing
@@ -414,50 +422,64 @@ class _Sidebar extends StatelessWidget {
                         color: const Color(0xff0f376f),
                         borderRadius: BorderRadius.circular(14),
                       ),
-                      child: Row(
-                        mainAxisAlignment: collapsed
-                            ? MainAxisAlignment.center
-                            : MainAxisAlignment.start,
-                        children: [
-                          CircleAvatar(
-                            backgroundColor: colors.primaryContainer,
-                            child: Text(
-                              store.userName.isEmpty ? 'ک' : store.userName[0],
-                              style: TextStyle(
-                                color: colors.onPrimaryContainer,
+                      child: collapsed
+                          ? Center(
+                              child: CircleAvatar(
+                                radius: 14,
+                                backgroundColor: colors.primaryContainer,
+                                child: Text(
+                                  store.userName.isEmpty
+                                      ? 'ک'
+                                      : store.userName[0],
+                                  style: TextStyle(
+                                    color: colors.onPrimaryContainer,
+                                    fontSize: 12,
+                                  ),
+                                ),
                               ),
-                            ),
-                          ),
-                          if (!collapsed) ...[
-                            const SizedBox(width: 10),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    store.userName,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: const TextStyle(
-                                      color: Colors.white,
-                                      fontWeight: FontWeight.w700,
+                            )
+                          : Row(
+                              children: [
+                                CircleAvatar(
+                                  backgroundColor: colors.primaryContainer,
+                                  child: Text(
+                                    store.userName.isEmpty
+                                        ? 'ک'
+                                        : store.userName[0],
+                                    style: TextStyle(
+                                      color: colors.onPrimaryContainer,
                                     ),
                                   ),
-                                  Text(
-                                    store.online
-                                        ? 'متصل به سرور'
-                                        : 'حالت آفلاین',
-                                    style: const TextStyle(
-                                      color: Color(0xffafc7e9),
-                                      fontSize: 12,
-                                    ),
+                                ),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        store.userName,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: const TextStyle(
+                                          color: Colors.white,
+                                          fontWeight: FontWeight.w700,
+                                        ),
+                                      ),
+                                      Text(
+                                        store.online
+                                            ? 'متصل به سرور'
+                                            : 'حالت آفلاین',
+                                        style: const TextStyle(
+                                          color: Color(0xffafc7e9),
+                                          fontSize: 12,
+                                        ),
+                                      ),
+                                    ],
                                   ),
-                                ],
-                              ),
+                                ),
+                              ],
                             ),
-                          ],
-                        ],
-                      ),
                     ),
                   ),
                 ),

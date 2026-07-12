@@ -12,9 +12,11 @@ class OpportunitiesPage extends StatelessWidget {
 
   Future<void> _openEditor(BuildContext context) async {
     if (store.customers.isEmpty) {
-      ScaffoldMessenger.of(
+      showCrmNotice(
         context,
-      ).showSnackBar(const SnackBar(content: Text('ابتدا یک مشتری ثبت کنید.')));
+        'ابتدا یک مشتری ثبت کنید.',
+        type: CrmNoticeType.warning,
+      );
       return;
     }
     final saved = await showDialog<bool>(
@@ -22,10 +24,10 @@ class OpportunitiesPage extends StatelessWidget {
       builder: (context) => _OpportunityEditor(store: store),
     );
     if (!context.mounted || saved != true) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('فرصت فروش ثبت و در صف همگام‌سازی قرار گرفت.'),
-      ),
+    showCrmNotice(
+      context,
+      'فرصت فروش ثبت و در صف همگام‌سازی قرار گرفت.',
+      type: CrmNoticeType.success,
     );
   }
 
@@ -423,15 +425,19 @@ class _OpportunityEditorState extends State<_OpportunityEditor> {
                 ),
                 SizedBox(
                   width: double.infinity,
-                  child: TextFormField(
+                  child: AutoInputDirection(
                     controller: _title,
-                    decoration: const InputDecoration(
-                      labelText: 'عنوان فرصت *',
-                      prefixIcon: Icon(Icons.track_changes_rounded),
+                    child: TextFormField(
+                      controller: _title,
+                      decoration: const InputDecoration(
+                        labelText: 'عنوان فرصت *',
+                        prefixIcon: Icon(Icons.track_changes_rounded),
+                      ),
+                      validator: (value) =>
+                          value == null || value.trim().isEmpty
+                          ? 'عنوان فرصت الزامی است.'
+                          : null,
                     ),
-                    validator: (value) => value == null || value.trim().isEmpty
-                        ? 'عنوان فرصت الزامی است.'
-                        : null,
                   ),
                 ),
                 SizedBox(
@@ -471,18 +477,21 @@ class _OpportunityEditorState extends State<_OpportunityEditor> {
                 ),
                 SizedBox(
                   width: 278,
-                  child: TextFormField(
+                  child: AutoInputDirection(
                     controller: _amount,
-                    keyboardType: TextInputType.number,
-                    decoration: const InputDecoration(
-                      labelText: 'مبلغ احتمالی (تومان)',
+                    child: TextFormField(
+                      controller: _amount,
+                      keyboardType: TextInputType.number,
+                      decoration: const InputDecoration(
+                        labelText: 'مبلغ احتمالی (تومان)',
+                      ),
+                      validator: (value) {
+                        if (value == null || value.trim().isEmpty) {
+                          return 'مبلغ را وارد کنید.';
+                        }
+                        return null;
+                      },
                     ),
-                    validator: (value) {
-                      if (value == null || value.trim().isEmpty) {
-                        return 'مبلغ را وارد کنید.';
-                      }
-                      return null;
-                    },
                   ),
                 ),
                 SizedBox(
@@ -524,13 +533,16 @@ class _OpportunityEditorState extends State<_OpportunityEditor> {
                 ),
                 SizedBox(
                   width: double.infinity,
-                  child: TextFormField(
+                  child: AutoInputDirection(
                     controller: _notes,
-                    minLines: 3,
-                    maxLines: 4,
-                    decoration: const InputDecoration(
-                      labelText: 'یادداشت و اقدام بعدی',
-                      alignLabelWithHint: true,
+                    child: TextFormField(
+                      controller: _notes,
+                      minLines: 3,
+                      maxLines: 4,
+                      decoration: const InputDecoration(
+                        labelText: 'یادداشت و اقدام بعدی',
+                        alignLabelWithHint: true,
+                      ),
                     ),
                   ),
                 ),

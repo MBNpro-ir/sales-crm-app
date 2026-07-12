@@ -36,12 +36,10 @@ class ReportsPage extends StatelessWidget {
           actions: [
             OutlinedButton.icon(
               onPressed: () {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text(
-                      'خروجی فایل در نسخه‌ی بعد به انتخاب محل ذخیره متصل می‌شود.',
-                    ),
-                  ),
+                showCrmNotice(
+                  context,
+                  'خروجی فایل در نسخه‌ی بعد به انتخاب محل ذخیره متصل می‌شود.',
+                  type: CrmNoticeType.info,
                 );
               },
               icon: const Icon(Icons.file_download_outlined),

@@ -1,4 +1,4 @@
-# Sales CRM Windows App — 0.0.1-alpha
+# Sales CRM Windows App — 0.0.2-alpha
 
 Private Flutter desktop application for Persian sales teams. The interface is
 RTL, uses bundled Vazirmatn Farsi-Digits, presents Jalali dates, and keeps

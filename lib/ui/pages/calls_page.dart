@@ -10,9 +10,11 @@ class CallsPage extends StatelessWidget {
 
   Future<void> _openEditor(BuildContext context) async {
     if (store.customers.isEmpty) {
-      ScaffoldMessenger.of(
+      showCrmNotice(
         context,
-      ).showSnackBar(const SnackBar(content: Text('ابتدا یک مشتری ثبت کنید.')));
+        'ابتدا یک مشتری ثبت کنید.',
+        type: CrmNoticeType.warning,
+      );
       return;
     }
     final saved = await showDialog<bool>(
@@ -20,8 +22,10 @@ class CallsPage extends StatelessWidget {
       builder: (context) => _CallEditorDialog(store: store),
     );
     if (!context.mounted || saved != true) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('تماس ثبت و برای همگام‌سازی صف شد.')),
+    showCrmNotice(
+      context,
+      'تماس ثبت و برای همگام‌سازی صف شد.',
+      type: CrmNoticeType.success,
     );
   }
 
@@ -284,15 +288,19 @@ class _CallEditorDialogState extends State<_CallEditorDialog> {
                 ),
                 SizedBox(
                   width: double.infinity,
-                  child: TextFormField(
+                  child: AutoInputDirection(
                     controller: _subject,
-                    decoration: const InputDecoration(
-                      labelText: 'موضوع تماس *',
-                      prefixIcon: Icon(Icons.subject_rounded),
+                    child: TextFormField(
+                      controller: _subject,
+                      decoration: const InputDecoration(
+                        labelText: 'موضوع تماس *',
+                        prefixIcon: Icon(Icons.subject_rounded),
+                      ),
+                      validator: (value) =>
+                          value == null || value.trim().isEmpty
+                          ? 'موضوع تماس الزامی است.'
+                          : null,
                     ),
-                    validator: (value) => value == null || value.trim().isEmpty
-                        ? 'موضوع تماس الزامی است.'
-                        : null,
                   ),
                 ),
                 _half(
@@ -347,14 +355,16 @@ class _CallEditorDialogState extends State<_CallEditorDialog> {
                     },
                   ),
                 ),
-                _half(
+                _input(
+                  _duration,
                   TextFormField(
                     controller: _duration,
                     keyboardType: TextInputType.number,
                     decoration: const InputDecoration(labelText: 'مدت (دقیقه)'),
                   ),
                 ),
-                _half(
+                _input(
+                  _amount,
                   TextFormField(
                     controller: _amount,
                     keyboardType: TextInputType.number,
@@ -382,13 +392,15 @@ class _CallEditorDialogState extends State<_CallEditorDialog> {
                     },
                   ),
                 ),
-                _half(
+                _input(
+                  _product,
                   TextFormField(
                     controller: _product,
                     decoration: const InputDecoration(labelText: 'کالا / خدمت'),
                   ),
                 ),
-                _half(
+                _input(
+                  _quantity,
                   TextFormField(
                     controller: _quantity,
                     keyboardType: TextInputType.number,
@@ -397,7 +409,8 @@ class _CallEditorDialogState extends State<_CallEditorDialog> {
                     ),
                   ),
                 ),
-                _half(
+                _input(
+                  _unitPrice,
                   TextFormField(
                     controller: _unitPrice,
                     keyboardType: TextInputType.number,
@@ -406,13 +419,16 @@ class _CallEditorDialogState extends State<_CallEditorDialog> {
                 ),
                 SizedBox(
                   width: double.infinity,
-                  child: TextFormField(
+                  child: AutoInputDirection(
                     controller: _notes,
-                    minLines: 3,
-                    maxLines: 4,
-                    decoration: const InputDecoration(
-                      labelText: 'شرح تماس و اقدام بعدی',
-                      alignLabelWithHint: true,
+                    child: TextFormField(
+                      controller: _notes,
+                      minLines: 3,
+                      maxLines: 4,
+                      decoration: const InputDecoration(
+                        labelText: 'شرح تماس و اقدام بعدی',
+                        alignLabelWithHint: true,
+                      ),
                     ),
                   ),
                 ),
@@ -459,5 +475,9 @@ class _CallEditorDialogState extends State<_CallEditorDialog> {
 
   Widget _half(Widget child) {
     return SizedBox(width: 270, child: child);
+  }
+
+  Widget _input(TextEditingController controller, Widget child) {
+    return _half(AutoInputDirection(controller: controller, child: child));
   }
 }

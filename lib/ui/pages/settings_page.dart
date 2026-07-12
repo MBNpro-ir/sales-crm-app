@@ -23,8 +23,12 @@ class SettingsPage extends StatelessWidget {
                   : () async {
                       await store.sync();
                       if (!context.mounted) return;
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(content: Text(store.syncMessage)),
+                      showCrmNotice(
+                        context,
+                        store.syncMessage,
+                        type: store.online
+                            ? CrmNoticeType.success
+                            : CrmNoticeType.warning,
                       );
                     },
               icon: const Icon(Icons.sync_rounded),
@@ -58,6 +62,8 @@ class SettingsPage extends StatelessWidget {
         ),
         const SizedBox(height: 18),
         _AppearanceCard(store: store),
+        const SizedBox(height: 18),
+        _CloseBehaviorCard(store: store),
         const SizedBox(height: 18),
         _AccessibilityCard(store: store),
         const SizedBox(height: 18),
@@ -267,9 +273,64 @@ class _AppearanceCard extends StatelessWidget {
             onChanged: store.setSidebarCollapsed,
             title: const Text('شروع با منوی جمع‌شده'),
             subtitle: const Text(
-              'در حالت جمع‌شده فقط آیکون‌های منوی سمت چپ نمایش داده می‌شوند.',
+              'در حالت جمع‌شده فقط آیکون‌های منوی سمت راست نمایش داده می‌شوند.',
             ),
             secondary: const Icon(Icons.menu_open_rounded),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _CloseBehaviorCard extends StatelessWidget {
+  const _CloseBehaviorCard({required this.store});
+
+  final CrmStore store;
+
+  @override
+  Widget build(BuildContext context) {
+    return SectionCard(
+      title: 'رفتار بستن در ویندوز',
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'در صورت انتخاب حالت Tray، پنجره مخفی می‌شود اما آیکون برنامه در ناحیهٔ اعلان ویندوز باقی می‌ماند. با کلیک روی آن یا گزینهٔ «باز کردن برنامه» دوباره پنجره نمایش داده می‌شود.',
+          ),
+          const SizedBox(height: 16),
+          DropdownButtonFormField<CloseBehavior>(
+            initialValue: store.closeBehavior,
+            decoration: const InputDecoration(
+              labelText: 'هنگام زدن دکمه بستن',
+              prefixIcon: Icon(Icons.power_settings_new_rounded),
+            ),
+            items: CloseBehavior.values
+                .map(
+                  (behavior) => DropdownMenuItem(
+                    value: behavior,
+                    child: Text(_closeBehaviorLabel(behavior)),
+                  ),
+                )
+                .toList(),
+            onChanged: (value) {
+              if (value != null) store.setCloseBehavior(value);
+            },
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Icon(
+                Icons.notifications_active_outlined,
+                color: Theme.of(context).colorScheme.primary,
+              ),
+              const SizedBox(width: 10),
+              const Expanded(
+                child: Text(
+                  'منوی Tray شامل دو گزینهٔ «باز کردن برنامه» و «بستن کامل برنامه» است.',
+                ),
+              ),
+            ],
           ),
         ],
       ),
@@ -443,5 +504,13 @@ String _accentLabel(CrmAccent accent) {
     CrmAccent.violet => 'بنفش',
     CrmAccent.amber => 'کهربایی',
     CrmAccent.rose => 'زرشکی',
+  };
+}
+
+String _closeBehaviorLabel(CloseBehavior behavior) {
+  return switch (behavior) {
+    CloseBehavior.ask => 'هر بار بپرس',
+    CloseBehavior.minimizeToTray => 'همیشه به Tray برود',
+    CloseBehavior.exit => 'همیشه خروج کامل',
   };
 }

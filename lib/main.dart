@@ -1,15 +1,49 @@
+import 'dart:async';
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
+import 'package:window_manager/window_manager.dart';
+import 'package:windows_single_instance/windows_single_instance.dart';
 
 import 'core/crm_store.dart';
 import 'ui/app_shell.dart';
+import 'ui/desktop_window_controller.dart';
 import 'ui/login_page.dart';
 
-Future<void> main() async {
+Future<void> main(List<String> arguments) async {
   WidgetsFlutterBinding.ensureInitialized();
+  if (Platform.isWindows) {
+    await windowManager.ensureInitialized();
+    await WindowsSingleInstance.ensureSingleInstance(
+      arguments,
+      'sales_crm_mbnpro_ir',
+      onSecondWindow: (_) => unawaited(_restoreExistingWindow()),
+    );
+    windowManager.waitUntilReadyToShow(
+      const WindowOptions(
+        size: Size(1280, 720),
+        minimumSize: Size(960, 640),
+        center: true,
+        skipTaskbar: false,
+        title: 'فروش‌یار CRM',
+      ),
+      () async {
+        await windowManager.show();
+        await windowManager.focus();
+      },
+    );
+  }
   final store = CrmStore();
   await store.initialize();
   runApp(CrmApp(store: store));
+}
+
+Future<void> _restoreExistingWindow() async {
+  if (!Platform.isWindows) return;
+  if (await windowManager.isMinimized()) await windowManager.restore();
+  await windowManager.show();
+  await windowManager.focus();
 }
 
 class CrmApp extends StatelessWidget {
@@ -46,9 +80,12 @@ class CrmApp extends StatelessWidget {
               ),
             );
           },
-          home: store.hasSession
-              ? AppShell(store: store)
-              : LoginPage(store: store),
+          home: DesktopWindowController(
+            store: store,
+            child: store.hasSession
+                ? AppShell(store: store)
+                : LoginPage(store: store),
+          ),
         );
       },
     );
