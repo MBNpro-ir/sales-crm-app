@@ -1,0 +1,129 @@
+name: Pre-release 0.0.2-alpha (Windows)
+
+run-name: Windows pre-release from ${{ github.ref_name }} @ ${{ github.sha }}
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: prerelease-v0.0.2-alpha
+  cancel-in-progress: true
+
+jobs:
+  build-windows:
+    name: Test and build Windows app
+    runs-on: windows-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter with SDK and Pub caching
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+          pub-cache: true
+
+      - name: Resolve dependencies
+        run: flutter pub get
+
+      - name: Analyze
+        run: flutter analyze
+
+      - name: Run tests
+        run: flutter test
+
+      - name: Build Windows release
+        run: >-
+          flutter build windows --release
+          --build-name=0.0.2
+          --build-number=${{ github.run_number }}
+
+      - name: Package Windows release
+        shell: pwsh
+        run: |
+          $package = Join-Path $env:GITHUB_WORKSPACE 'sales-crm-windows-0.0.2-alpha.zip'
+          if (Test-Path -LiteralPath $package) {
+            Remove-Item -LiteralPath $package -Force
+          }
+          Compress-Archive `
+            -Path (Join-Path $env:GITHUB_WORKSPACE 'build\windows\x64\runner\Release\*') `
+            -DestinationPath $package `
+            -CompressionLevel Optimal
+
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-package
+          path: sales-crm-windows-0.0.2-alpha.zip
+          if-no-files-found: error
+          retention-days: 14
+
+  publish:
+    name: Publish GitHub pre-release
+    needs: build-windows
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out source and tags
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download Windows artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-package
+          path: dist
+
+      - name: Create or move release tag
+        env:
+          TAG: v0.0.2-alpha
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git fetch --tags origin
+          git tag -fa "$TAG" "$GITHUB_SHA" -m "Sales CRM $TAG"
+          git push origin "refs/tags/$TAG" --force
+
+      - name: Create or update pre-release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: v0.0.2-alpha
+          SHA: ${{ github.sha }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          asset="$(find dist -maxdepth 1 -type f -name '*.zip' -print -quit)"
+          test -n "$asset"
+          sha256sum "$asset" > dist/SHA256SUMS.txt
+          notes="Automated Windows pre-release for 0.0.2-alpha.
+
+          Commit: $SHA
+          Workflow run: $RUN_ID
+          This release is refreshed after every push to main."
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release edit "$TAG" \
+              --title 'Sales CRM 0.0.2-alpha' \
+              --notes "$notes" \
+              --prerelease \
+              --target "$SHA"
+            gh release upload "$TAG" "$asset" dist/SHA256SUMS.txt --clobber
+          else
+            gh release create "$TAG" "$asset" dist/SHA256SUMS.txt \
+              --title 'Sales CRM 0.0.2-alpha' \
+              --notes "$notes" \
+              --prerelease \
+              --latest=false \
+              --verify-tag
+          fi

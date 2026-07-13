@@ -20,6 +20,14 @@ Start the API and web administration panel first with the repository-root
 flutter build windows --release --dart-define=API_BASE_URL=https://crm-api.example.com/api/v1
 ```
 
+## Automated alpha pre-release
+
+`.github/workflows/prerelease.yml` runs on every push to `main` (or from the
+Actions **Run workflow** button). It analyzes, tests, and builds the Windows
+application, then refreshes the GitHub pre-release `v0.0.2-alpha` with the
+latest ZIP and SHA-256 checksum. The workflow caches the Flutter SDK and Dart
+Pub cache, keyed by the platform, Flutter channel, and `pubspec.lock`.
+
 The application contains no pre-seeded CRM records or sample account. Its first
 login requires an administrator created by the server installer.
 
