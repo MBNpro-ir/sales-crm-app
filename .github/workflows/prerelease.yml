@@ -129,8 +129,11 @@ jobs:
           RUN_ID: ${{ github.run_id }}
           REPOSITORY: ${{ github.repository }}
         run: |
-          package="$(find dist -maxdepth 1 -type f -name '*.zip' -print -quit)"
-          updater="$(find dist -maxdepth 1 -type f -name 'sales_crm_updater.exe' -print -quit)"
+          # upload-artifact preserves a nested path for the updater. Search the
+          # complete downloaded artifact instead of assuming both assets are at
+          # the root of dist.
+          package="$(find dist -type f -name '*.zip' -print -quit)"
+          updater="$(find dist -type f -name 'sales_crm_updater.exe' -print -quit)"
           test -n "$package"
           test -n "$updater"
           sha="$(sha256sum "$package" | awk '{print $1}')"
