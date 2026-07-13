@@ -280,7 +280,7 @@ class _CallsPageState extends State<CallsPage> {
                                       ? '—'
                                       : formatPersianInteger(
                                           call.quantity,
-                                          grouping: true,
+                                          grouping: false,
                                         ),
                                 ),
                               ),
@@ -345,10 +345,10 @@ class _CallEditorDialogState extends State<_CallEditorDialog> {
     _customerId = call.customerId;
     _subject.text = call.subject;
     _notes.text = call.notes;
-    _duration.text = formatPersianInteger(call.durationMinutes, grouping: true);
+    _duration.text = formatPersianInteger(call.durationMinutes);
     _amount.text = formatPersianInteger(call.amount, grouping: true);
     _product.text = call.productName;
-    _quantity.text = formatPersianInteger(call.quantity, grouping: true);
+    _quantity.text = formatPersianInteger(call.quantity);
     _unitPrice.text = formatPersianInteger(call.unitPrice, grouping: true);
     _type = call.type;
     _direction = call.direction;
@@ -492,6 +492,7 @@ class _CallEditorDialogState extends State<_CallEditorDialog> {
                     _amount,
                     'مبلغ احتمالی (ریال)',
                     required: true,
+                    rial: true,
                   ),
                 ),
                 ResponsiveFormField(
@@ -517,7 +518,7 @@ class _CallEditorDialogState extends State<_CallEditorDialog> {
                   child: _numberField(_quantity, 'تعداد یا تناژ'),
                 ),
                 ResponsiveFormField(
-                  child: _numberField(_unitPrice, 'فی (ریال)'),
+                  child: _numberField(_unitPrice, 'فی (ریال)', rial: true),
                 ),
                 ResponsiveFormField.full(
                   child: AutoInputDirection(
@@ -609,13 +610,16 @@ class _CallEditorDialogState extends State<_CallEditorDialog> {
     TextEditingController controller,
     String label, {
     bool required = false,
+    bool rial = false,
   }) {
     return AutoInputDirection(
       controller: controller,
       child: TextFormField(
         controller: controller,
         keyboardType: TextInputType.number,
-        inputFormatters: const [persianNumberFormatter],
+        inputFormatters: rial
+            ? const [persianRialFormatter]
+            : const [persianNumberFormatter],
         decoration: InputDecoration(labelText: label),
         validator: required
             ? (value) => value == null || value.trim().isEmpty

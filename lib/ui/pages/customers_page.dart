@@ -258,8 +258,8 @@ class _CustomerEditorDialogState extends State<_CustomerEditorDialog> {
     if (customer == null) return;
     _name.text = customer.name;
     _company.text = customer.company;
-    _mobile.text = customer.mobile;
-    _phone.text = customer.phone;
+    _mobile.text = formatPersianDigitsOnly(customer.mobile);
+    _phone.text = formatPersianDigitsOnly(customer.phone);
     _province.text = customer.province;
     _city.text = customer.city;
     _activity = customer.activityType;
@@ -268,16 +268,20 @@ class _CustomerEditorDialogState extends State<_CustomerEditorDialog> {
     _notes.text = customer.notes;
     final details = customer.details;
     _email.text = details['email'] ?? '';
-    _secondaryMobile.text = details['secondary_mobile'] ?? '';
-    _nationalId.text = details['national_id'] ?? '';
+    _secondaryMobile.text = formatPersianDigitsOnly(
+      details['secondary_mobile'] ?? '',
+    );
+    _nationalId.text = formatPersianDigitsOnly(details['national_id'] ?? '');
     _district.text = details['district'] ?? '';
     _address.text = details['address'] ?? '';
-    _postalCode.text = details['postal_code'] ?? '';
+    _postalCode.text = formatPersianDigitsOnly(details['postal_code'] ?? '');
     _source.text = details['source'] ?? '';
     _interestedProducts.text = details['interested_products'] ?? '';
-    _monthlyVolume.text = details['monthly_volume'] ?? '';
+    _monthlyVolume.text = formatPersianDigitsOnly(
+      details['monthly_volume'] ?? '',
+    );
     _paymentTerms.text = details['payment_terms'] ?? '';
-    _fax.text = details['fax'] ?? '';
+    _fax.text = formatPersianDigitsOnly(details['fax'] ?? '');
     _website.text = details['website'] ?? '';
   }
 
@@ -313,8 +317,8 @@ class _CustomerEditorDialogState extends State<_CustomerEditorDialog> {
     await widget.store.saveCustomer(
       name: _name.text,
       company: _company.text,
-      mobile: _mobile.text,
-      phone: _phone.text,
+      mobile: formatPersianDigitsOnly(_mobile.text),
+      phone: formatPersianDigitsOnly(_phone.text),
       province: _province.text,
       city: _city.text,
       activityType: _activity,
@@ -323,16 +327,16 @@ class _CustomerEditorDialogState extends State<_CustomerEditorDialog> {
       notes: _notes.text,
       details: {
         'email': _email.text.trim(),
-        'secondary_mobile': _secondaryMobile.text.trim(),
-        'national_id': _nationalId.text.trim(),
+        'secondary_mobile': formatPersianDigitsOnly(_secondaryMobile.text),
+        'national_id': formatPersianDigitsOnly(_nationalId.text),
         'district': _district.text.trim(),
         'address': _address.text.trim(),
-        'postal_code': _postalCode.text.trim(),
+        'postal_code': formatPersianDigitsOnly(_postalCode.text),
         'source': _source.text.trim(),
         'interested_products': _interestedProducts.text.trim(),
-        'monthly_volume': _monthlyVolume.text.trim(),
+        'monthly_volume': formatPersianDigitsOnly(_monthlyVolume.text),
         'payment_terms': _paymentTerms.text.trim(),
-        'fax': _fax.text.trim(),
+        'fax': formatPersianDigitsOnly(_fax.text),
         'website': _website.text.trim(),
       },
       id: widget.customer?.id,

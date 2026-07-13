@@ -157,7 +157,7 @@ class _ProductsPageState extends State<ProductsPage> {
                       ),
                       title: Text(product.name),
                       subtitle: Text(
-                        'موجودی ${formatPersianInteger(product.stock, grouping: true)} ${product.unit}، حداقل ${formatPersianInteger(product.minStock, grouping: true)}',
+                        'موجودی ${formatPersianInteger(product.stock)} ${product.unit}، حداقل ${formatPersianInteger(product.minStock)}',
                       ),
                       trailing: Text(
                         'نیازمند تأمین',
@@ -254,7 +254,7 @@ class _ProductsPageState extends State<ProductsPage> {
                               DataCell(Text(compactMoney(product.unitPrice))),
                               DataCell(
                                 Text(
-                                  '${formatPersianInteger(product.stock, grouping: true)} / حداقل ${formatPersianInteger(product.minStock, grouping: true)}',
+                                  '${formatPersianInteger(product.stock)} / حداقل ${formatPersianInteger(product.minStock)}',
                                 ),
                               ),
                               DataCell(
@@ -317,8 +317,8 @@ class _ProductEditorState extends State<_ProductEditor> {
     _category.text = product.category;
     _unit.text = product.unit;
     _price.text = formatPersianInteger(product.unitPrice, grouping: true);
-    _stock.text = formatPersianInteger(product.stock, grouping: true);
-    _minStock.text = formatPersianInteger(product.minStock, grouping: true);
+    _stock.text = formatPersianInteger(product.stock);
+    _minStock.text = formatPersianInteger(product.minStock);
     _description.text = product.description;
     _active = product.isActive;
   }
@@ -378,6 +378,7 @@ class _ProductEditorState extends State<_ProductEditor> {
                     _price,
                     'قیمت پایه (ریال)',
                     required: true,
+                    rial: true,
                   ),
                 ),
                 ResponsiveFormField(child: _numberField(_stock, 'موجودی فعلی')),
@@ -459,13 +460,16 @@ class _ProductEditorState extends State<_ProductEditor> {
     TextEditingController controller,
     String label, {
     bool required = false,
+    bool rial = false,
   }) {
     return AutoInputDirection(
       controller: controller,
       child: TextFormField(
         controller: controller,
         keyboardType: TextInputType.number,
-        inputFormatters: const [persianNumberFormatter],
+        inputFormatters: rial
+            ? const [persianRialFormatter]
+            : const [persianNumberFormatter],
         decoration: InputDecoration(labelText: label),
         validator: required
             ? (value) => value == null || value.trim().isEmpty

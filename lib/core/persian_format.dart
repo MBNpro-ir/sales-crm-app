@@ -30,6 +30,19 @@ int parsePersianInt(String value) {
   return int.tryParse(normalized) ?? 0;
 }
 
+/// Normalizes an identifier or a non-monetary numeric value without applying
+/// thousands separators. Unlike [parsePersianInt], this deliberately keeps
+/// leading zeroes intact for mobile numbers, postal codes and national IDs.
+String formatPersianDigitsOnly(String value, {bool allowNegative = false}) {
+  var normalized = toEnglishDigits(value).replaceAll(RegExp(r'[^0-9-]'), '');
+  if (!allowNegative) {
+    normalized = normalized.replaceAll('-', '');
+  } else if (normalized.indexOf('-') > 0) {
+    normalized = normalized.replaceAll('-', '');
+  }
+  return toPersianDigits(normalized);
+}
+
 String formatPersianInteger(int value, {bool grouping = false}) {
   final raw = value.abs().toString();
   final grouped = grouping

@@ -186,13 +186,17 @@ class AutoInputDirection extends StatelessWidget {
   }
 }
 
-/// Normalizes Persian/Arabic/Latin digits, rejects non-numeric characters and
-/// renders a live three-digit grouping separator. Stored values should be read
-/// with [parsePersianInt], which understands this representation.
+/// Normalizes Persian/Arabic/Latin digits and rejects non-numeric characters.
+/// Thousands grouping is opt-in and must only be enabled for monetary fields;
+/// telephone numbers, identifiers and quantities must stay contiguous.
 class PersianNumberFormatter extends TextInputFormatter {
-  const PersianNumberFormatter({this.allowNegative = false});
+  const PersianNumberFormatter({
+    this.allowNegative = false,
+    this.grouping = false,
+  });
 
   final bool allowNegative;
+  final bool grouping;
 
   @override
   TextEditingValue formatEditUpdate(
@@ -212,8 +216,9 @@ class PersianNumberFormatter extends TextInputFormatter {
         selection: TextSelection.collapsed(offset: normalized.isEmpty ? 0 : 1),
       );
     }
-    final number = int.tryParse(normalized) ?? 0;
-    final value = formatPersianInteger(number, grouping: true);
+    final value = grouping
+        ? formatPersianInteger(int.tryParse(normalized) ?? 0, grouping: true)
+        : formatPersianDigitsOnly(normalized, allowNegative: allowNegative);
     return TextEditingValue(
       text: value,
       selection: TextSelection.collapsed(offset: value.length),
@@ -229,6 +234,7 @@ final textOnlyFormatter = FilteringTextInputFormatter.allow(
 );
 
 const persianNumberFormatter = PersianNumberFormatter();
+const persianRialFormatter = PersianNumberFormatter(grouping: true);
 
 class ResponsiveFormField extends StatelessWidget {
   const ResponsiveFormField({

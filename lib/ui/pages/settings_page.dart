@@ -86,7 +86,7 @@ class SettingsPage extends StatelessWidget {
                 icon: Icons.numbers_outlined,
                 label: 'نمایش اعداد',
                 value:
-                    'فارسی، مثل ${formatPersianInteger(1234567, grouping: true)}',
+                    'فارسی، مثل ${formatPersianInteger(1234567)}',
                 color: const Color(0xff8349d6),
               ),
               const SizedBox(height: 14),

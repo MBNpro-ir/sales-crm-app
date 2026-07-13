@@ -433,7 +433,7 @@ class _OpportunityEditorState extends State<_OpportunityEditor> {
                     child: TextFormField(
                       controller: _amount,
                       keyboardType: TextInputType.number,
-                      inputFormatters: const [persianNumberFormatter],
+                      inputFormatters: const [persianRialFormatter],
                       decoration: const InputDecoration(
                         labelText: 'مبلغ احتمالی (ریال)',
                       ),

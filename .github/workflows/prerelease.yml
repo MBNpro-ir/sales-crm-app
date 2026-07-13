@@ -1,4 +1,4 @@
-name: Pre-release 0.0.4-alpha (Windows)
+name: Pre-release 0.0.5-alpha (Windows)
 
 run-name: Windows pre-release from ${{ github.ref_name }} @ ${{ github.sha }}
 
@@ -12,7 +12,7 @@ permissions:
   actions: write
 
 concurrency:
-  group: prerelease-v0.0.4-alpha
+  group: prerelease-v0.0.5-alpha
   cancel-in-progress: true
 
 jobs:
@@ -54,9 +54,9 @@ jobs:
       - name: Build Windows release
         run: >-
           flutter build windows --release
-          --build-name=0.0.4
+          --build-name=0.0.5
           --build-number=${{ github.run_number }}
-          --dart-define=APP_VERSION=0.0.4-alpha
+          --dart-define=APP_VERSION=0.0.5-alpha
           --dart-define=BUILD_SHA=${{ github.sha }}
           --dart-define=UPDATE_REPOSITORY=${{ github.repository }}
 
@@ -79,7 +79,7 @@ jobs:
       - name: Package Windows release
         shell: pwsh
         run: |
-          $package = Join-Path $env:GITHUB_WORKSPACE 'sales-crm-windows-0.0.4-alpha.zip'
+          $package = Join-Path $env:GITHUB_WORKSPACE 'sales-crm-windows-0.0.5-alpha.zip'
           if (Test-Path -LiteralPath $package) {
             Remove-Item -LiteralPath $package -Force
           }
@@ -93,7 +93,7 @@ jobs:
         with:
           name: windows-release-assets
           path: |
-            sales-crm-windows-0.0.4-alpha.zip
+            sales-crm-windows-0.0.5-alpha.zip
             build/updater/sales_crm_updater.exe
           if-no-files-found: error
           retention-days: 14
@@ -118,7 +118,7 @@ jobs:
 
       - name: Create or move release tag
         env:
-          TAG: v0.0.4-alpha
+          TAG: v0.0.5-alpha
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
@@ -129,7 +129,7 @@ jobs:
       - name: Create or update pre-release
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: v0.0.4-alpha
+          TAG: v0.0.5-alpha
           SHA: ${{ github.sha }}
           RUN_ID: ${{ github.run_id }}
           REPOSITORY: ${{ github.repository }}
@@ -146,22 +146,22 @@ jobs:
           package_name="$(basename "$package")"
           cat > dist/sales-crm-update.json <<EOF
           {
-            "version": "0.0.4-alpha",
+            "version": "0.0.5-alpha",
             "build_sha": "$SHA",
             "package_url": "https://github.com/$REPOSITORY/releases/download/$TAG/$package_name",
             "sha256": "$sha"
           }
           EOF
-          notes="Automated Windows pre-release for 0.0.4-alpha.
+          notes="Automated Windows pre-release for 0.0.5-alpha.
 
           Commit: $SHA
           Workflow run: $RUN_ID
           Includes the standalone Windows updater and an update manifest."
 
           if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release edit "$TAG" --title 'Sales CRM 0.0.4-alpha' --notes "$notes" --prerelease --target "$SHA"
+            gh release edit "$TAG" --title 'Sales CRM 0.0.5-alpha' --notes "$notes" --prerelease --target "$SHA"
             gh release upload "$TAG" "$package" "$updater" dist/SHA256SUMS.txt dist/sales-crm-update.json --clobber
           else
             gh release create "$TAG" "$package" "$updater" dist/SHA256SUMS.txt dist/sales-crm-update.json \
-              --title 'Sales CRM 0.0.4-alpha' --notes "$notes" --prerelease --latest=false --verify-tag
+              --title 'Sales CRM 0.0.5-alpha' --notes "$notes" --prerelease --latest=false --verify-tag
           fi

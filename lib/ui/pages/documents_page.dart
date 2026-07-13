@@ -566,7 +566,7 @@ class _DocumentEditorState extends State<_DocumentEditor> {
                     child: TextFormField(
                       controller: _amount,
                       keyboardType: TextInputType.number,
-                      inputFormatters: const [persianNumberFormatter],
+                      inputFormatters: const [persianRialFormatter],
                       decoration: const InputDecoration(
                         labelText: 'مبلغ کل (ریال) *',
                       ),

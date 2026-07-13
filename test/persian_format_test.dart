@@ -6,8 +6,22 @@ void main() {
     expect(formatCompactMoney(1234567), '۱٬۲۳۴٬۵۶۷ ریال');
   });
 
-  test('numeric fields reject letters and keep grouped Persian digits', () {
-    const formatter = PersianNumberFormatter();
+  test(
+    'identifier fields reject letters without grouping or losing zeroes',
+    () {
+      const formatter = PersianNumberFormatter();
+      final value = formatter.formatEditUpdate(
+        const TextEditingValue(),
+        const TextEditingValue(text: '۰۹۱۲a۳۴۵۶۷۸۹'),
+      );
+
+      expect(value.text, '۰۹۱۲۳۴۵۶۷۸۹');
+      expect(value.text.contains('٬'), isFalse);
+    },
+  );
+
+  test('Rial inputs are the only grouped numeric fields', () {
+    const formatter = PersianNumberFormatter(grouping: true);
     final value = formatter.formatEditUpdate(
       const TextEditingValue(),
       const TextEditingValue(text: '۱۲۳۴a۵۶۷'),
