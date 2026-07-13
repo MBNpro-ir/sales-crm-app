@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
@@ -42,9 +44,13 @@ class CrmStore extends ChangeNotifier {
   bool _online = false;
   String _syncMessage = 'آماده برای همگام‌سازی';
   String? _accessToken;
+  String? _organizationId;
   String _userName = 'کاربر آفلاین';
   String _organizationName = 'فضای کاری من';
   int _pendingOutboxCount = 0;
+  Timer? _sessionGuard;
+  bool _checkingSession = false;
+  String? _sessionNotice;
 
   ThemeMode get themeMode => _themeMode;
   CrmAccent get accent => _accent;
@@ -70,6 +76,7 @@ class CrmStore extends ChangeNotifier {
   String get syncMessage => _syncMessage;
   String get userName => _userName;
   String get organizationName => _organizationName;
+  String? get organizationId => _organizationId;
   String get apiBaseUrl => _api.baseUrl;
   int get pendingOutboxCount => _pendingOutboxCount;
 
@@ -137,16 +144,29 @@ class CrmStore extends ChangeNotifier {
     );
     _accessToken = _preferences!.getString('access_token');
     _api.accessToken = _accessToken;
+    _organizationId = _preferences!.getString('organization_id');
     _userName = _preferences!.getString('user_name') ?? _userName;
     _organizationName =
         _preferences!.getString('organization_name') ?? _organizationName;
     await _database.initialize();
     await _database.removeLegacyDemoData();
-    await refresh();
+    if (hasSession && _organizationId == null) {
+      // Older alpha builds did not persist the organization id. Do not expose
+      // their local cache until this session has reloaded its own workspace.
+      await _database.clearWorkspace();
+    }
+    if (hasSession) {
+      await refresh();
+    } else {
+      _clearInMemory();
+    }
     _online = await _api.health();
     if (_online && hasSession) {
-      await sync(silent: true);
+      await _validateSession();
+      if (hasSession) await sync(silent: true);
     }
+    if (hasSession) _startSessionGuard();
+    notifyListeners();
   }
 
   Future<void> refresh() async {
@@ -232,17 +252,28 @@ class CrmStore extends ChangeNotifier {
     notifyListeners();
     try {
       final session = await _api.login(identifier.trim(), password);
+      final changingWorkspace = _organizationId != session.organizationId;
+      if (changingWorkspace) {
+        await _database.clearWorkspace();
+        _clearInMemory();
+      }
       _accessToken = session.accessToken;
       _api.accessToken = session.accessToken;
       _userName = session.userName;
+      _organizationId = session.organizationId;
       _organizationName = session.organizationName;
       await _preferences?.setString('access_token', session.accessToken);
       await _preferences?.setString('user_name', session.userName);
+      await _preferences?.setString('organization_id', session.organizationId);
       await _preferences?.setString(
         'organization_name',
         session.organizationName,
       );
       await sync(silent: true);
+      if (!hasSession) {
+        return 'دسترسی این حساب در سرور غیرفعال شده است.';
+      }
+      _startSessionGuard();
       return null;
     } on ApiException catch (error) {
       return error.message;
@@ -255,10 +286,7 @@ class CrmStore extends ChangeNotifier {
   }
 
   Future<void> logout() async {
-    _accessToken = null;
-    _api.accessToken = null;
-    await _preferences?.remove('access_token');
-    notifyListeners();
+    await _endSession(clearWorkspace: true);
   }
 
   Future<void> sync({bool silent = false}) async {
@@ -288,6 +316,12 @@ class CrmStore extends ChangeNotifier {
     } on ApiException catch (error) {
       _online = false;
       _syncMessage = error.message;
+      if (error.isUnauthorized) {
+        await _endSession(
+          clearWorkspace: true,
+          notice: 'دسترسی این حساب تغییر کرده یا غیرفعال شده است؛ دوباره وارد شوید.',
+        );
+      }
     } catch (_) {
       _online = false;
       _syncMessage = 'سرور در دسترس نیست؛ تغییرات در صف محلی نگهداری شد.';
@@ -661,5 +695,90 @@ class CrmStore extends ChangeNotifier {
     if (_online && hasSession) {
       await sync(silent: true);
     }
+  }
+
+  void _startSessionGuard() {
+    _sessionGuard?.cancel();
+    _sessionGuard = Timer.periodic(
+      const Duration(seconds: 40),
+      (_) => unawaited(_validateSession()),
+    );
+  }
+
+  Future<void> _validateSession() async {
+    if (!hasSession || _checkingSession) return;
+    _checkingSession = true;
+    try {
+      final session = await _api.currentSession();
+      if (_organizationId != null && _organizationId != session.organizationId) {
+        await _endSession(
+          clearWorkspace: true,
+          notice: 'فضای کاری این حساب تغییر کرده است؛ دوباره وارد شوید.',
+        );
+        return;
+      }
+      _organizationId = session.organizationId;
+      _userName = session.userName;
+      _organizationName = session.organizationName;
+      await _preferences?.setString('organization_id', session.organizationId);
+      await _preferences?.setString('user_name', session.userName);
+      await _preferences?.setString('organization_name', session.organizationName);
+    } on ApiException catch (error) {
+      if (error.isUnauthorized) {
+        await _endSession(
+          clearWorkspace: true,
+          notice: 'دسترسی این حساب تغییر کرده یا غیرفعال شده است؛ دوباره وارد شوید.',
+        );
+      }
+    } finally {
+      _checkingSession = false;
+    }
+  }
+
+  Future<void> _endSession({
+    required bool clearWorkspace,
+    String? notice,
+  }) async {
+    _sessionGuard?.cancel();
+    _sessionGuard = null;
+    _accessToken = null;
+    _api.accessToken = null;
+    _organizationId = null;
+    _userName = 'کاربر آفلاین';
+    _organizationName = 'فضای کاری من';
+    _online = false;
+    _syncing = false;
+    _syncMessage = 'برای همگام‌سازی ابتدا وارد حساب شوید.';
+    if (notice != null) _sessionNotice = notice;
+    await _preferences?.remove('access_token');
+    await _preferences?.remove('user_name');
+    await _preferences?.remove('organization_id');
+    await _preferences?.remove('organization_name');
+    if (clearWorkspace) await _database.clearWorkspace();
+    _clearInMemory();
+    notifyListeners();
+  }
+
+  void _clearInMemory() {
+    _customers = const [];
+    _calls = const [];
+    _products = const [];
+    _opportunities = const [];
+    _tasks = const [];
+    _quotes = const [];
+    _orders = const [];
+    _pendingOutboxCount = 0;
+  }
+
+  String? takeSessionNotice() {
+    final notice = _sessionNotice;
+    _sessionNotice = null;
+    return notice;
+  }
+
+  @override
+  void dispose() {
+    _sessionGuard?.cancel();
+    super.dispose();
   }
 }

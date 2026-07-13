@@ -163,6 +163,20 @@ class LocalDatabase {
     });
   }
 
+  /// Removes the local workspace when the signed-in company changes or a user
+  /// signs out. Keeping one SQLite file is fine only when its contents never
+  /// cross an organization boundary.
+  Future<void> clearWorkspace() async {
+    final database = await _db;
+    await database.transaction((transaction) async {
+      await transaction.delete('customers');
+      await transaction.delete('calls');
+      await transaction.delete('crm_records');
+      await transaction.delete('outbox');
+      await transaction.delete('metadata');
+    });
+  }
+
   Future<List<CrmCustomer>> customers() async {
     final database = await _db;
     final rows = await database.query(

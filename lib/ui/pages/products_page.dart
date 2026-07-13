@@ -360,8 +360,8 @@ class _ProductEditorState extends State<_ProductEditor> {
       title: Text(
         widget.product == null ? 'ثبت محصول یا خدمت' : 'ویرایش محصول یا خدمت',
       ),
-      content: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 580),
+      content: CrmDialogContent(
+        maxWidth: 700,
         child: Form(
           key: _form,
           child: SingleChildScrollView(

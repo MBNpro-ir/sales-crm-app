@@ -7,7 +7,7 @@ import 'package:path/path.dart' as p;
 
 const currentAppVersion = String.fromEnvironment(
   'APP_VERSION',
-  defaultValue: '0.0.3-alpha',
+  defaultValue: '0.0.4-alpha',
 );
 const currentBuildSha = String.fromEnvironment('BUILD_SHA', defaultValue: '');
 const updateRepository = String.fromEnvironment(

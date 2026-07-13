@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:persian_datetime_picker/persian_datetime_picker.dart';
 
 import '../../core/crm_store.dart';
 import '../../core/models.dart';
@@ -372,18 +371,14 @@ class _CallEditorDialogState extends State<_CallEditorDialog> {
   }
 
   Future<void> _pickFollowUpDate() async {
-    final date = await showPersianDatePicker(
-      context: context,
-      initialDate: Jalali.fromDateTime(_nextFollowUp ?? DateTime.now()),
-      firstDate: Jalali.fromDateTime(
-        DateTime.now().subtract(const Duration(days: 1)),
-      ),
-      lastDate: Jalali.fromDateTime(
-        DateTime.now().add(const Duration(days: 730)),
-      ),
+    final date = await showCrmJalaliDatePicker(
+      context,
+      initialDate: _nextFollowUp ?? DateTime.now(),
+      firstDate: DateTime.now().subtract(const Duration(days: 1)),
+      lastDate: DateTime.now().add(const Duration(days: 730)),
     );
     if (date != null && mounted) {
-      setState(() => _nextFollowUp = date.toDateTime());
+      setState(() => _nextFollowUp = date);
     }
   }
 
@@ -417,8 +412,8 @@ class _CallEditorDialogState extends State<_CallEditorDialog> {
   Widget build(BuildContext context) {
     return AlertDialog(
       title: Text(widget.call == null ? 'ثبت و پیگیری تماس' : 'ویرایش تماس'),
-      content: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 560),
+      content: CrmDialogContent(
+        maxWidth: 680,
         child: Form(
           key: _formKey,
           child: SingleChildScrollView(

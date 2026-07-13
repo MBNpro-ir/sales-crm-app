@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:persian_datetime_picker/persian_datetime_picker.dart';
 
 import '../../core/crm_store.dart';
 import '../../core/models.dart';
@@ -444,16 +443,14 @@ class _DocumentEditorState extends State<_DocumentEditor> {
   }
 
   Future<void> _pickDate() async {
-    final date = await showPersianDatePicker(
-      context: context,
-      initialDate: Jalali.fromDateTime(_validUntil ?? DateTime.now()),
-      firstDate: Jalali.fromDateTime(DateTime.now()),
-      lastDate: Jalali.fromDateTime(
-        DateTime.now().add(const Duration(days: 730)),
-      ),
+    final date = await showCrmJalaliDatePicker(
+      context,
+      initialDate: _validUntil ?? DateTime.now(),
+      firstDate: DateTime.now(),
+      lastDate: DateTime.now().add(const Duration(days: 730)),
     );
     if (date != null && mounted) {
-      setState(() => _validUntil = date.toDateTime());
+      setState(() => _validUntil = date);
     }
   }
 
@@ -502,8 +499,8 @@ class _DocumentEditorState extends State<_DocumentEditor> {
             ? 'ویرایش ${_isQuote ? 'پیش‌فاکتور' : 'سفارش'}'
             : 'ثبت ${_isQuote ? 'پیش‌فاکتور' : 'سفارش'}',
       ),
-      content: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 540),
+      content: CrmDialogContent(
+        maxWidth: 680,
         child: Form(
           key: _form,
           child: SingleChildScrollView(

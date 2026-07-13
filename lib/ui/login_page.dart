@@ -19,6 +19,17 @@ class _LoginPageState extends State<LoginPage> {
   bool _obscurePassword = true;
 
   @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final notice = widget.store.takeSessionNotice();
+      if (notice != null && mounted) {
+        showCrmNotice(context, notice, type: CrmNoticeType.warning);
+      }
+    });
+  }
+
+  @override
   void dispose() {
     _identifier.dispose();
     _password.dispose();

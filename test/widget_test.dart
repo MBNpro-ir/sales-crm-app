@@ -53,7 +53,32 @@ void main() {
 
   test('input direction follows Persian, Latin and numbers', () {
     expect(inputTextDirection('سلام'), TextDirection.rtl);
-    expect(inputTextDirection('CRM 0.0.3'), TextDirection.ltr);
+    expect(inputTextDirection('CRM 0.0.4'), TextDirection.ltr);
     expect(inputTextDirection('۱۲۳۴۵'), TextDirection.ltr);
+  });
+
+  testWidgets('Jalali picker owns its Persian month header', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Builder(
+          builder: (context) => TextButton(
+            onPressed: () {
+              showCrmJalaliDatePicker(
+                context,
+                initialDate: DateTime(2026, 7, 14),
+              );
+            },
+            child: const Text('باز کردن تقویم'),
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('باز کردن تقویم'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('تیر ۱۴۰۵'), findsOneWidget);
+    expect(find.textContaining('ژوئن'), findsNothing);
+    expect(tester.takeException(), isNull);
   });
 }

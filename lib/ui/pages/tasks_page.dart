@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:persian_datetime_picker/persian_datetime_picker.dart';
 
 import '../../core/crm_store.dart';
 import '../../core/models.dart';
@@ -346,17 +345,13 @@ class _TaskEditorState extends State<_TaskEditor> {
   }
 
   Future<void> _pickDate() async {
-    final date = await showPersianDatePicker(
-      context: context,
-      initialDate: Jalali.fromDateTime(_dueAt ?? DateTime.now()),
-      firstDate: Jalali.fromDateTime(
-        DateTime.now().subtract(const Duration(days: 1)),
-      ),
-      lastDate: Jalali.fromDateTime(
-        DateTime.now().add(const Duration(days: 730)),
-      ),
+    final date = await showCrmJalaliDatePicker(
+      context,
+      initialDate: _dueAt ?? DateTime.now(),
+      firstDate: DateTime.now().subtract(const Duration(days: 1)),
+      lastDate: DateTime.now().add(const Duration(days: 730)),
     );
-    if (date != null && mounted) setState(() => _dueAt = date.toDateTime());
+    if (date != null && mounted) setState(() => _dueAt = date);
   }
 
   Future<void> _save() async {
@@ -384,8 +379,8 @@ class _TaskEditorState extends State<_TaskEditor> {
       title: Text(
         widget.task == null ? 'ثبت وظیفه و پیگیری' : 'ویرایش وظیفه و پیگیری',
       ),
-      content: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 540),
+      content: CrmDialogContent(
+        maxWidth: 680,
         child: Form(
           key: _form,
           child: SingleChildScrollView(

@@ -33,9 +33,22 @@ class ApiClient {
       body: jsonEncode({'identifier': identifier, 'password': password}),
     );
     if (response.statusCode != 200) {
-      throw ApiException(_errorText(response));
+      throw ApiException(_errorText(response), response.statusCode);
     }
     return AuthSession.fromJson(
+      Map<String, dynamic>.from(jsonDecode(response.body) as Map),
+    );
+  }
+
+  Future<SessionIdentity> currentSession() async {
+    final response = await _client.get(
+      Uri.parse(baseUrl + '/auth/me'),
+      headers: _headers,
+    );
+    if (response.statusCode != 200) {
+      throw ApiException(_errorText(response), response.statusCode);
+    }
+    return SessionIdentity.fromJson(
       Map<String, dynamic>.from(jsonDecode(response.body) as Map),
     );
   }
@@ -53,7 +66,7 @@ class ApiClient {
       }),
     );
     if (response.statusCode != 200) {
-      throw ApiException(_errorText(response));
+      throw ApiException(_errorText(response), response.statusCode);
     }
     return SyncResponse.fromJson(
       Map<String, dynamic>.from(jsonDecode(response.body) as Map),
@@ -82,9 +95,12 @@ class ApiClient {
 }
 
 class ApiException implements Exception {
-  const ApiException(this.message);
+  const ApiException(this.message, [this.statusCode]);
 
   final String message;
+  final int? statusCode;
+
+  bool get isUnauthorized => statusCode == 401;
 
   @override
   String toString() => message;

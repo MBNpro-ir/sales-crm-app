@@ -1,5 +1,8 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:shamsi_date/shamsi_date.dart';
 
 import '../../core/persian_format.dart';
 
@@ -256,7 +259,11 @@ class ResponsiveFormGrid extends StatelessWidget {
     this.breakpoint = 500,
   });
 
-  final List<ResponsiveFormField> children;
+  /// Normal widgets occupy one responsive column. Wrap a child in
+  /// [ResponsiveFormField.full] when it must span the whole dialog.
+  /// Keeping this list typed as [Widget] makes the grid safe to adopt in
+  /// existing dialogs without reintroducing fixed-width wrappers.
+  final List<Widget> children;
   final double spacing;
   final double runSpacing;
   final double breakpoint;
@@ -272,16 +279,323 @@ class ResponsiveFormGrid extends StatelessWidget {
         return Wrap(
           spacing: spacing,
           runSpacing: runSpacing,
-          children: children
-              .map(
-                (item) => SizedBox(
-                  width: item.full ? constraints.maxWidth : width,
-                  child: item,
-                ),
-              )
-              .toList(),
+          children: children.map((item) {
+            final formField = item is ResponsiveFormField ? item : null;
+            return SizedBox(
+              width: formField?.full == true ? constraints.maxWidth : width,
+              child: formField?.child ?? item,
+            );
+          }).toList(),
         );
       },
+    );
+  }
+}
+
+/// Gives desktop dialogs a real, responsive width. `ConstrainedBox(maxWidth:)`
+/// alone keeps AlertDialog's intrinsic width (often about 280px), which was the
+/// reason several data-entry popups collapsed into a single narrow column.
+class CrmDialogContent extends StatelessWidget {
+  const CrmDialogContent({super.key, required this.child, this.maxWidth = 680});
+
+  final Widget child;
+  final double maxWidth;
+
+  @override
+  Widget build(BuildContext context) {
+    // AlertDialog keeps its own insets.  Do not force a width wider than the
+    // actual viewport on a temporarily narrow desktop window.
+    final available = math.max(0.0, MediaQuery.sizeOf(context).width - 48);
+    return SizedBox(width: math.min(maxWidth, available), child: child);
+  }
+}
+
+/// A Jalali-only calendar. The package picker previously used a Jalali grid
+/// with Gregorian Material labels, so users could still see months such as
+/// June. This widget owns both the month label and the day grid.
+Future<DateTime?> showCrmJalaliDatePicker(
+  BuildContext context, {
+  DateTime? initialDate,
+  DateTime? firstDate,
+  DateTime? lastDate,
+  String title = 'انتخاب تاریخ شمسی',
+}) {
+  final now = DateTime.now();
+  return showDialog<DateTime>(
+    context: context,
+    builder: (context) => _CrmJalaliDatePickerDialog(
+      title: title,
+      initialDate: initialDate ?? now,
+      firstDate: firstDate ?? DateTime(now.year - 15),
+      lastDate: lastDate ?? DateTime(now.year + 15),
+    ),
+  );
+}
+
+class _CrmJalaliDatePickerDialog extends StatefulWidget {
+  const _CrmJalaliDatePickerDialog({
+    required this.title,
+    required this.initialDate,
+    required this.firstDate,
+    required this.lastDate,
+  });
+
+  final String title;
+  final DateTime initialDate;
+  final DateTime firstDate;
+  final DateTime lastDate;
+
+  @override
+  State<_CrmJalaliDatePickerDialog> createState() =>
+      _CrmJalaliDatePickerDialogState();
+}
+
+class _CrmJalaliDatePickerDialogState
+    extends State<_CrmJalaliDatePickerDialog> {
+  static const _months = <String>[
+    'فروردین',
+    'اردیبهشت',
+    'خرداد',
+    'تیر',
+    'مرداد',
+    'شهریور',
+    'مهر',
+    'آبان',
+    'آذر',
+    'دی',
+    'بهمن',
+    'اسفند',
+  ];
+  static const _weekdays = <String>['ش', 'ی', 'د', 'س', 'چ', 'پ', 'ج'];
+
+  late final Jalali _first;
+  late final Jalali _last;
+  late Jalali _selected;
+  late Jalali _displayed;
+
+  @override
+  void initState() {
+    super.initState();
+    _first = Jalali.fromDateTime(_dateOnly(widget.firstDate));
+    _last = Jalali.fromDateTime(_dateOnly(widget.lastDate));
+    final candidate = Jalali.fromDateTime(_dateOnly(widget.initialDate));
+    _selected = _clamp(candidate);
+    _displayed = Jalali(_selected.year, _selected.month);
+  }
+
+  DateTime _dateOnly(DateTime value) =>
+      DateTime(value.year, value.month, value.day);
+
+  Jalali _clamp(Jalali value) {
+    if (value.compareTo(_first) < 0) return _first;
+    if (value.compareTo(_last) > 0) return _last;
+    return value;
+  }
+
+  bool _canShow(Jalali month) {
+    final firstOfMonth = Jalali(month.year, month.month);
+    final lastOfMonth = Jalali(month.year, month.month, month.monthLength);
+    return firstOfMonth.compareTo(_last) <= 0 &&
+        lastOfMonth.compareTo(_first) >= 0;
+  }
+
+  void _moveMonth(int direction) {
+    var year = _displayed.year;
+    var month = _displayed.month + direction;
+    if (month == 0) {
+      month = 12;
+      year--;
+    } else if (month == 13) {
+      month = 1;
+      year++;
+    }
+    final next = Jalali(year, month);
+    if (_canShow(next)) setState(() => _displayed = next);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final firstCell = _displayed.weekDay - 1;
+    final dayCount = _displayed.monthLength;
+    final previous = _monthAt(-1);
+    final next = _monthAt(1);
+    return Dialog(
+      insetPadding: const EdgeInsets.all(24),
+      clipBehavior: Clip.antiAlias,
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxHeight: math.max(0, MediaQuery.sizeOf(context).height - 48),
+        ),
+        child: SingleChildScrollView(
+          child: CrmDialogContent(
+            maxWidth: 460,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(22, 20, 22, 14),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          widget.title,
+                          style: Theme.of(context).textTheme.titleLarge
+                              ?.copyWith(fontWeight: FontWeight.w800),
+                        ),
+                      ),
+                      IconButton(
+                        tooltip: 'بستن',
+                        onPressed: () => Navigator.of(context).pop(),
+                        icon: const Icon(Icons.close_rounded),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 10,
+                    ),
+                    decoration: BoxDecoration(
+                      color: scheme.primaryContainer,
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: Text(
+                      formatJalaliDate(_selected.toDateTime()),
+                      textAlign: TextAlign.center,
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        color: scheme.onPrimaryContainer,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      IconButton(
+                        tooltip: 'ماه بعد',
+                        onPressed: _canShow(next) ? () => _moveMonth(1) : null,
+                        icon: const Icon(Icons.chevron_right_rounded),
+                      ),
+                      Expanded(
+                        child: Text(
+                          '${_months[_displayed.month - 1]} ${toPersianDigits(_displayed.year)}',
+                          textAlign: TextAlign.center,
+                          style: Theme.of(context).textTheme.titleMedium
+                              ?.copyWith(fontWeight: FontWeight.w800),
+                        ),
+                      ),
+                      IconButton(
+                        tooltip: 'ماه قبل',
+                        onPressed: _canShow(previous)
+                            ? () => _moveMonth(-1)
+                            : null,
+                        icon: const Icon(Icons.chevron_left_rounded),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  GridView.count(
+                    crossAxisCount: 7,
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    childAspectRatio: 1.18,
+                    children: [
+                      for (final day in _weekdays)
+                        Center(
+                          child: Text(
+                            day,
+                            style: Theme.of(context).textTheme.labelMedium
+                                ?.copyWith(
+                                  color: scheme.onSurfaceVariant,
+                                  fontWeight: FontWeight.w800,
+                                ),
+                          ),
+                        ),
+                      for (var index = 0; index < 42; index++)
+                        if (index < firstCell || index >= firstCell + dayCount)
+                          const SizedBox()
+                        else
+                          _dayButton(
+                            Jalali(
+                              _displayed.year,
+                              _displayed.month,
+                              index - firstCell + 1,
+                            ),
+                          ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: [
+                      TextButton(
+                        onPressed: () => Navigator.of(context).pop(),
+                        child: const Text('انصراف'),
+                      ),
+                      const SizedBox(width: 8),
+                      FilledButton(
+                        onPressed: () =>
+                            Navigator.of(context).pop(_selected.toDateTime()),
+                        child: const Text('تأیید'),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Jalali _monthAt(int delta) {
+    var year = _displayed.year;
+    var month = _displayed.month + delta;
+    if (month == 0) {
+      month = 12;
+      year--;
+    } else if (month == 13) {
+      month = 1;
+      year++;
+    }
+    return Jalali(year, month);
+  }
+
+  Widget _dayButton(Jalali date) {
+    final enabled = date.compareTo(_first) >= 0 && date.compareTo(_last) <= 0;
+    final selected =
+        date.year == _selected.year &&
+        date.month == _selected.month &&
+        date.day == _selected.day;
+    return Padding(
+      padding: const EdgeInsets.all(2),
+      child: Material(
+        color: selected
+            ? Theme.of(context).colorScheme.primary
+            : Colors.transparent,
+        shape: const CircleBorder(),
+        child: InkWell(
+          customBorder: const CircleBorder(),
+          onTap: enabled ? () => setState(() => _selected = date) : null,
+          child: Center(
+            child: Text(
+              toPersianDigits(date.day),
+              style: TextStyle(
+                color: !enabled
+                    ? Theme.of(context).disabledColor
+                    : selected
+                    ? Theme.of(context).colorScheme.onPrimary
+                    : null,
+                fontWeight: selected ? FontWeight.w900 : FontWeight.w600,
+              ),
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

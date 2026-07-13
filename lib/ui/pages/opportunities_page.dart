@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:persian_datetime_picker/persian_datetime_picker.dart';
 
 import '../../core/crm_store.dart';
 import '../../core/models.dart';
@@ -322,18 +321,14 @@ class _OpportunityEditorState extends State<_OpportunityEditor> {
   }
 
   Future<void> _pickDate() async {
-    final date = await showPersianDatePicker(
-      context: context,
-      initialDate: Jalali.fromDateTime(_expectedClose ?? DateTime.now()),
-      firstDate: Jalali.fromDateTime(
-        DateTime.now().subtract(const Duration(days: 1)),
-      ),
-      lastDate: Jalali.fromDateTime(
-        DateTime.now().add(const Duration(days: 730)),
-      ),
+    final date = await showCrmJalaliDatePicker(
+      context,
+      initialDate: _expectedClose ?? DateTime.now(),
+      firstDate: DateTime.now().subtract(const Duration(days: 1)),
+      lastDate: DateTime.now().add(const Duration(days: 730)),
     );
     if (date != null && mounted) {
-      setState(() => _expectedClose = date.toDateTime());
+      setState(() => _expectedClose = date);
     }
   }
 
@@ -370,8 +365,8 @@ class _OpportunityEditorState extends State<_OpportunityEditor> {
       title: Text(
         widget.opportunity == null ? 'ثبت فرصت فروش' : 'ویرایش فرصت فروش',
       ),
-      content: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 580),
+      content: CrmDialogContent(
+        maxWidth: 700,
         child: Form(
           key: _form,
           child: SingleChildScrollView(

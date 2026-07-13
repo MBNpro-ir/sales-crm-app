@@ -345,14 +345,12 @@ class _CustomerEditorDialogState extends State<_CustomerEditorDialog> {
   Widget build(BuildContext context) {
     return AlertDialog(
       title: Text(widget.customer == null ? 'ثبت مشتری جدید' : 'ویرایش مشتری'),
-      content: SizedBox(
-        width: 620,
+      content: CrmDialogContent(
+        maxWidth: 720,
         child: Form(
           key: _formKey,
           child: SingleChildScrollView(
-            child: Wrap(
-              spacing: 12,
-              runSpacing: 12,
+            child: ResponsiveFormGrid(
               children: [
                 _input(
                   _name,
@@ -526,8 +524,7 @@ class _CustomerEditorDialogState extends State<_CustomerEditorDialog> {
                     },
                   ),
                 ),
-                SizedBox(
-                  width: double.infinity,
+                ResponsiveFormField.full(
                   child: Text(
                     'اطلاعات کسب‌وکار و آدرس',
                     style: Theme.of(context).textTheme.titleSmall?.copyWith(
@@ -589,8 +586,7 @@ class _CustomerEditorDialogState extends State<_CustomerEditorDialog> {
                     decoration: const InputDecoration(labelText: 'کد پستی'),
                   ),
                 ),
-                SizedBox(
-                  width: double.infinity,
+                ResponsiveFormField.full(
                   child: AutoInputDirection(
                     controller: _address,
                     child: TextFormField(
@@ -621,8 +617,7 @@ class _CustomerEditorDialogState extends State<_CustomerEditorDialog> {
                     decoration: const InputDecoration(labelText: 'وب‌سایت'),
                   ),
                 ),
-                SizedBox(
-                  width: double.infinity,
+                ResponsiveFormField.full(
                   child: AutoInputDirection(
                     controller: _notes,
                     child: TextFormField(
@@ -661,9 +656,7 @@ class _CustomerEditorDialogState extends State<_CustomerEditorDialog> {
     );
   }
 
-  Widget _wideField(Widget child) {
-    return SizedBox(width: 272, child: child);
-  }
+  Widget _wideField(Widget child) => child;
 
   Widget _input(TextEditingController controller, Widget child) {
     return _wideField(AutoInputDirection(controller: controller, child: child));

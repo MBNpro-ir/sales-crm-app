@@ -1,4 +1,4 @@
-# Sales CRM Windows App — 0.0.3-alpha
+# Sales CRM Windows App — 0.0.4-alpha
 
 Private Flutter desktop application for Persian sales teams. The interface is
 RTL, uses bundled Vazirmatn Farsi-Digits, presents Jalali dates, and keeps
@@ -25,9 +25,10 @@ flutter build windows --release --dart-define=API_BASE_URL=https://crm-api.examp
 `.github/workflows/prerelease.yml` runs on every push to `main` (or from the
 Actions **Run workflow** button). It analyzes, tests, and builds the Windows
 application and the standalone Windows updater, then refreshes the GitHub
-pre-release `v0.0.3-alpha` with the latest ZIP, updater executable, update
-manifest, and SHA-256 checksums. The workflow caches the Flutter SDK and Dart
-Pub cache, keyed by the platform, Flutter channel, and `pubspec.lock`.
+pre-release `v0.0.4-alpha` with the latest ZIP, updater executable, update
+manifest, and SHA-256 checksums. It pins Flutter `3.44.6` and uses the official
+Flutter Action SDK/Pub cache keys, so the existing Windows cache is restored
+until the SDK version or `pubspec.lock` changes.
 
 The application contains no pre-seeded CRM records or sample account. Its first
 login requires an administrator created by the server installer.

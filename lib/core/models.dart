@@ -710,17 +710,40 @@ class AuthSession {
   const AuthSession({
     required this.accessToken,
     required this.userName,
+    required this.organizationId,
     required this.organizationName,
   });
 
   final String accessToken;
   final String userName;
+  final String organizationId;
   final String organizationName;
 
   factory AuthSession.fromJson(Map<String, dynamic> value) {
     return AuthSession(
       accessToken: _text(value['access_token']),
       userName: _text(value['user_name']),
+      organizationId: _text(value['organization_id']),
+      organizationName: _text(value['organization_name']),
+    );
+  }
+}
+
+class SessionIdentity {
+  const SessionIdentity({
+    required this.userName,
+    required this.organizationId,
+    required this.organizationName,
+  });
+
+  final String userName;
+  final String organizationId;
+  final String organizationName;
+
+  factory SessionIdentity.fromJson(Map<String, dynamic> value) {
+    return SessionIdentity(
+      userName: _text(value['user_name']),
+      organizationId: _text(value['organization_id']),
       organizationName: _text(value['organization_name']),
     );
   }
