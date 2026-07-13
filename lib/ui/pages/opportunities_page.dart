@@ -5,13 +5,28 @@ import '../../core/crm_store.dart';
 import '../../core/models.dart';
 import '../widgets/common.dart';
 
-class OpportunitiesPage extends StatelessWidget {
+class OpportunitiesPage extends StatefulWidget {
   const OpportunitiesPage({super.key, required this.store});
 
   final CrmStore store;
 
-  Future<void> _openEditor(BuildContext context) async {
-    if (store.customers.isEmpty) {
+  @override
+  State<OpportunitiesPage> createState() => _OpportunitiesPageState();
+}
+
+class _OpportunitiesPageState extends State<OpportunitiesPage> {
+  final _search = TextEditingController();
+  int _sortColumn = 4;
+  bool _sortAscending = false;
+
+  @override
+  void dispose() {
+    _search.dispose();
+    super.dispose();
+  }
+
+  Future<void> _openEditor([CrmOpportunity? opportunity]) async {
+    if (widget.store.customers.isEmpty) {
       showCrmNotice(
         context,
         'ابتدا یک مشتری ثبت کنید.',
@@ -21,18 +36,68 @@ class OpportunitiesPage extends StatelessWidget {
     }
     final saved = await showDialog<bool>(
       context: context,
-      builder: (context) => _OpportunityEditor(store: store),
+      builder: (context) =>
+          _OpportunityEditor(store: widget.store, opportunity: opportunity),
     );
-    if (!context.mounted || saved != true) return;
+    if (!mounted || saved != true) return;
     showCrmNotice(
       context,
-      'فرصت فروش ثبت و در صف همگام‌سازی قرار گرفت.',
+      opportunity == null ? 'فرصت فروش ثبت شد.' : 'فرصت فروش ویرایش شد.',
       type: CrmNoticeType.success,
     );
   }
 
+  Future<void> _delete(CrmOpportunity opportunity) async {
+    if (!await confirmDelete(context, label: opportunity.title)) return;
+    await widget.store.deleteOpportunity(opportunity);
+    if (mounted) {
+      showCrmNotice(
+        context,
+        'فرصت به حذف‌شده‌ها منتقل شد.',
+        type: CrmNoticeType.warning,
+      );
+    }
+  }
+
+  void _sort(int index) => setState(() {
+    if (_sortColumn == index) {
+      _sortAscending = !_sortAscending;
+    } else {
+      _sortColumn = index;
+      _sortAscending = true;
+    }
+  });
+
   @override
   Widget build(BuildContext context) {
+    final needle = _search.text.trim().toLowerCase();
+    final rows = widget.store.opportunities
+        .where(
+          (item) =>
+              needle.isEmpty ||
+              item.title.toLowerCase().contains(needle) ||
+              item.customerName.toLowerCase().contains(needle) ||
+              item.stage.contains(needle),
+        )
+        .toList();
+    final values = <Comparable<Object?> Function(CrmOpportunity)>[
+      (item) => item.customerName,
+      (item) => item.title,
+      (item) => item.stage,
+      (item) => item.amount,
+      (item) => item.probability,
+      (item) => item.expectedClose ?? DateTime(9999),
+    ];
+    rows.sort((left, right) {
+      final result = values[_sortColumn](
+        left,
+      ).compareTo(values[_sortColumn](right));
+      return _sortAscending ? result : -result;
+    });
+    final total = widget.store.opportunities.fold<int>(
+      0,
+      (sum, item) => sum + item.amount,
+    );
     const stages = [
       'تماس اولیه',
       'نیازسنجی',
@@ -41,10 +106,6 @@ class OpportunitiesPage extends StatelessWidget {
       'برنده شده',
       'از دست رفته',
     ];
-    final total = store.opportunities.fold<int>(
-      0,
-      (sum, opportunity) => sum + opportunity.amount,
-    );
     return ListView(
       children: [
         CrmPageHeader(
@@ -53,7 +114,7 @@ class OpportunitiesPage extends StatelessWidget {
               'فرصت‌ها را از تماس اولیه تا قرارداد در قیف فروش پیگیری کنید.',
           actions: [
             FilledButton.icon(
-              onPressed: () => _openEditor(context),
+              onPressed: _openEditor,
               icon: const Icon(Icons.add_chart_rounded),
               label: const Text('فرصت جدید'),
             ),
@@ -68,13 +129,13 @@ class OpportunitiesPage extends StatelessWidget {
               width: 250,
               child: KpiCard(
                 title: 'فرصت‌های باز',
-                value: store.openOpportunities.toString(),
+                value: widget.store.openOpportunities.toString(),
                 icon: Icons.track_changes_rounded,
                 color: const Color(0xff8349d6),
               ),
             ),
             SizedBox(
-              width: 250,
+              width: 280,
               child: KpiCard(
                 title: 'ارزش کل قیف',
                 value: compactMoney(total),
@@ -83,10 +144,10 @@ class OpportunitiesPage extends StatelessWidget {
               ),
             ),
             SizedBox(
-              width: 250,
+              width: 280,
               child: KpiCard(
                 title: 'درآمد وزن‌دار',
-                value: compactMoney(store.weightedPipeline),
+                value: compactMoney(widget.store.weightedPipeline),
                 icon: Icons.auto_graph_rounded,
                 color: const Color(0xff12966b),
               ),
@@ -95,77 +156,120 @@ class OpportunitiesPage extends StatelessWidget {
         ),
         const SizedBox(height: 18),
         SectionCard(
-          title: 'قیف فروش',
-          trailing: Text(
-            'برای جابه‌جایی مرحله، فرصت را باز و ویرایش کنید.',
-            style: Theme.of(context).textTheme.labelSmall,
+          title: 'نمای قیف فروش',
+          child: Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            children: stages.map((stage) {
+              final count = widget.store.opportunities
+                  .where((item) => item.stage == stage)
+                  .length;
+              return Chip(
+                avatar: CircleAvatar(child: Text(formatPersianInteger(count))),
+                label: Text(stage),
+              );
+            }).toList(),
           ),
-          padding: const EdgeInsets.all(14),
-          child: SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: stages.map((stage) {
-                final items = store.opportunities
-                    .where((opportunity) => opportunity.stage == stage)
-                    .toList();
-                return _PipelineColumn(stage: stage, items: items);
-              }).toList(),
+        ),
+        const SizedBox(height: 18),
+        SectionCard(
+          title: 'جست‌وجوی فرصت‌ها',
+          child: AutoInputDirection(
+            controller: _search,
+            child: TextField(
+              controller: _search,
+              onChanged: (_) => setState(() {}),
+              decoration: const InputDecoration(
+                prefixIcon: Icon(Icons.search_rounded),
+                hintText: 'مشتری، عنوان یا مرحله فروش',
+              ),
             ),
           ),
         ),
         const SizedBox(height: 18),
         SectionCard(
-          title: 'همه فرصت‌ها',
-          child: store.opportunities.isEmpty
+          title: 'فرصت‌های ثبت‌شده',
+          trailing: Text('${formatPersianInteger(rows.length)} مورد'),
+          child: rows.isEmpty
               ? const EmptyState(
                   icon: Icons.track_changes_outlined,
-                  title: 'فرصتی ثبت نشده است',
-                  message:
-                      'با ثبت اولین فرصت، قیف فروش و نرخ تبدیل ساخته می‌شود.',
+                  title: 'فرصتی پیدا نشد',
+                  message: 'فرصت جدیدی ثبت کنید یا جست‌وجو را تغییر دهید.',
                 )
-              : SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
+              : CrmTableScroll(
                   child: DataTable(
                     headingRowColor: WidgetStatePropertyAll(
                       Theme.of(context).colorScheme.surfaceContainerHighest,
                     ),
-                    columns: const [
-                      DataColumn(label: Text('فرصت')),
-                      DataColumn(label: Text('مشتری')),
-                      DataColumn(label: Text('مرحله')),
-                      DataColumn(label: Text('مبلغ')),
-                      DataColumn(label: Text('احتمال')),
-                      DataColumn(label: Text('تاریخ هدف')),
+                    sortColumnIndex: _sortColumn,
+                    sortAscending: _sortAscending,
+                    columns: [
+                      DataColumn(
+                        label: const Text('مشتری'),
+                        onSort: (_, _) => _sort(0),
+                      ),
+                      DataColumn(
+                        label: const Text('عنوان'),
+                        onSort: (_, _) => _sort(1),
+                      ),
+                      DataColumn(
+                        label: const Text('مرحله'),
+                        onSort: (_, _) => _sort(2),
+                      ),
+                      DataColumn(
+                        label: const Text('مبلغ (ریال)'),
+                        numeric: true,
+                        onSort: (_, _) => _sort(3),
+                      ),
+                      DataColumn(
+                        label: const Text('احتمال'),
+                        numeric: true,
+                        onSort: (_, _) => _sort(4),
+                      ),
+                      DataColumn(
+                        label: const Text('تاریخ هدف'),
+                        onSort: (_, _) => _sort(5),
+                      ),
+                      const DataColumn(label: Text('عملیات')),
                     ],
-                    rows: store.opportunities.map((opportunity) {
-                      return DataRow(
-                        cells: [
-                          DataCell(
-                            SizedBox(
-                              width: 210,
-                              child: Text(
-                                opportunity.title,
-                                overflow: TextOverflow.ellipsis,
+                    rows: rows
+                        .map(
+                          (item) => DataRow(
+                            cells: [
+                              DataCell(Text(item.customerName)),
+                              DataCell(
+                                SizedBox(
+                                  width: 190,
+                                  child: Text(
+                                    item.title,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
                               ),
-                            ),
+                              DataCell(StatusPill(label: item.stage)),
+                              DataCell(Text(compactMoney(item.amount))),
+                              DataCell(
+                                Text(
+                                  '${formatPersianInteger(item.probability)}٪',
+                                ),
+                              ),
+                              DataCell(
+                                Text(
+                                  item.expectedClose == null
+                                      ? '—'
+                                      : compactDate(item.expectedClose!),
+                                ),
+                              ),
+                              DataCell(
+                                RecordActions(
+                                  onEdit: () => _openEditor(item),
+                                  onDelete: () => _delete(item),
+                                ),
+                              ),
+                            ],
                           ),
-                          DataCell(Text(opportunity.customerName)),
-                          DataCell(_StagePill(stage: opportunity.stage)),
-                          DataCell(Text(compactMoney(opportunity.amount))),
-                          DataCell(
-                            Text(opportunity.probability.toString() + '%'),
-                          ),
-                          DataCell(
-                            Text(
-                              opportunity.expectedClose == null
-                                  ? '—'
-                                  : compactDate(opportunity.expectedClose!),
-                            ),
-                          ),
-                        ],
-                      );
-                    }).toList(),
+                        )
+                        .toList(),
                   ),
                 ),
         ),
@@ -174,156 +278,11 @@ class OpportunitiesPage extends StatelessWidget {
   }
 }
 
-class _PipelineColumn extends StatelessWidget {
-  const _PipelineColumn({required this.stage, required this.items});
-
-  final String stage;
-  final List<CrmOpportunity> items;
-
-  @override
-  Widget build(BuildContext context) {
-    final color = _stageColor(stage);
-    return Container(
-      width: 250,
-      margin: const EdgeInsets.only(left: 12),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.07),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: color.withValues(alpha: 0.25)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  stage,
-                  style: const TextStyle(fontWeight: FontWeight.w800),
-                ),
-              ),
-              CircleAvatar(
-                radius: 13,
-                backgroundColor: color,
-                child: Text(
-                  items.length.toString(),
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          if (items.isEmpty)
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 24),
-              child: Center(
-                child: Text(
-                  'موردی ندارد',
-                  style: Theme.of(context).textTheme.bodySmall,
-                ),
-              ),
-            ),
-          for (final item in items)
-            Container(
-              width: double.infinity,
-              margin: const EdgeInsets.only(bottom: 10),
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Theme.of(context).colorScheme.surface,
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    item.title,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontWeight: FontWeight.w800),
-                  ),
-                  const SizedBox(height: 5),
-                  Text(
-                    item.customerName,
-                    style: Theme.of(context).textTheme.bodySmall,
-                  ),
-                  const SizedBox(height: 10),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          compactMoney(item.amount),
-                          style: TextStyle(
-                            color: color,
-                            fontWeight: FontWeight.w800,
-                            fontSize: 12,
-                          ),
-                        ),
-                      ),
-                      Text(
-                        item.probability.toString() + '%',
-                        style: Theme.of(context).textTheme.labelSmall,
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-}
-
-class _StagePill extends StatelessWidget {
-  const _StagePill({required this.stage});
-
-  final String stage;
-
-  @override
-  Widget build(BuildContext context) {
-    final color = _stageColor(stage);
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(99),
-      ),
-      child: Text(
-        stage,
-        style: TextStyle(color: color, fontWeight: FontWeight.w800),
-      ),
-    );
-  }
-}
-
-Color _stageColor(String stage) {
-  switch (stage) {
-    case 'تماس اولیه':
-      return const Color(0xff0b63ce);
-    case 'نیازسنجی':
-      return const Color(0xff26a7a4);
-    case 'پیش‌فاکتور':
-      return const Color(0xffe58a00);
-    case 'مذاکره':
-      return const Color(0xff8349d6);
-    case 'برنده شده':
-      return const Color(0xff12966b);
-    case 'از دست رفته':
-      return const Color(0xffd84b4b);
-    default:
-      return const Color(0xff52627a);
-  }
-}
-
 class _OpportunityEditor extends StatefulWidget {
-  const _OpportunityEditor({required this.store});
+  const _OpportunityEditor({required this.store, this.opportunity});
 
   final CrmStore store;
+  final CrmOpportunity? opportunity;
 
   @override
   State<_OpportunityEditor> createState() => _OpportunityEditorState();
@@ -332,13 +291,27 @@ class _OpportunityEditor extends StatefulWidget {
 class _OpportunityEditorState extends State<_OpportunityEditor> {
   final _form = GlobalKey<FormState>();
   final _title = TextEditingController();
-  final _amount = TextEditingController();
+  final _amount = TextEditingController(text: '۰');
   final _notes = TextEditingController();
   String? _customerId;
   String _stage = 'تماس اولیه';
-  double _probability = 30;
-  DateTime? _expectedClose;
+  double _probability = 20;
+  DateTime? _expectedClose = DateTime.now().add(const Duration(days: 30));
   bool _saving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    final item = widget.opportunity;
+    if (item == null) return;
+    _customerId = item.customerId;
+    _title.text = item.title;
+    _amount.text = formatPersianInteger(item.amount, grouping: true);
+    _notes.text = item.notes;
+    _stage = item.stage;
+    _probability = item.probability.toDouble();
+    _expectedClose = item.expectedClose;
+  }
 
   @override
   void dispose() {
@@ -351,9 +324,7 @@ class _OpportunityEditorState extends State<_OpportunityEditor> {
   Future<void> _pickDate() async {
     final date = await showPersianDatePicker(
       context: context,
-      initialDate: Jalali.fromDateTime(
-        _expectedClose ?? DateTime.now().add(const Duration(days: 14)),
-      ),
+      initialDate: Jalali.fromDateTime(_expectedClose ?? DateTime.now()),
       firstDate: Jalali.fromDateTime(
         DateTime.now().subtract(const Duration(days: 1)),
       ),
@@ -362,9 +333,7 @@ class _OpportunityEditorState extends State<_OpportunityEditor> {
       ),
     );
     if (date != null && mounted) {
-      setState(() {
-        _expectedClose = date.toDateTime();
-      });
+      setState(() => _expectedClose = date.toDateTime());
     }
   }
 
@@ -373,10 +342,9 @@ class _OpportunityEditorState extends State<_OpportunityEditor> {
     final customer = widget.store.customers.firstWhere(
       (item) => item.id == _customerId,
     );
-    setState(() {
-      _saving = true;
-    });
+    setState(() => _saving = true);
     await widget.store.saveOpportunity(
+      id: widget.opportunity?.id,
       customer: customer,
       title: _title.text,
       stage: _stage,
@@ -390,45 +358,54 @@ class _OpportunityEditorState extends State<_OpportunityEditor> {
 
   @override
   Widget build(BuildContext context) {
+    const stages = [
+      'تماس اولیه',
+      'نیازسنجی',
+      'پیش‌فاکتور',
+      'مذاکره',
+      'برنده شده',
+      'از دست رفته',
+    ];
     return AlertDialog(
-      title: const Text('ثبت فرصت فروش'),
-      content: SizedBox(
-        width: 580,
+      title: Text(
+        widget.opportunity == null ? 'ثبت فرصت فروش' : 'ویرایش فرصت فروش',
+      ),
+      content: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 580),
         child: Form(
           key: _form,
           child: SingleChildScrollView(
-            child: Wrap(
-              spacing: 12,
-              runSpacing: 12,
+            child: ResponsiveFormGrid(
               children: [
-                SizedBox(
-                  width: double.infinity,
+                ResponsiveFormField.full(
                   child: DropdownButtonFormField<String>(
+                    initialValue: _customerId,
+                    isExpanded: true,
                     decoration: const InputDecoration(labelText: 'مشتری *'),
-                    items: widget.store.customers.map((customer) {
-                      final label = customer.company.isEmpty
-                          ? customer.name
-                          : customer.company;
-                      return DropdownMenuItem(
-                        value: customer.id,
-                        child: Text(label),
-                      );
-                    }).toList(),
+                    items: widget.store.customers
+                        .map(
+                          (customer) => DropdownMenuItem(
+                            value: customer.id,
+                            child: Text(
+                              customer.company.isEmpty
+                                  ? customer.name
+                                  : customer.company,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        )
+                        .toList(),
                     validator: (value) =>
                         value == null ? 'یک مشتری انتخاب کنید.' : null,
-                    onChanged: (value) {
-                      setState(() {
-                        _customerId = value;
-                      });
-                    },
+                    onChanged: (value) => setState(() => _customerId = value),
                   ),
                 ),
-                SizedBox(
-                  width: double.infinity,
+                ResponsiveFormField.full(
                   child: AutoInputDirection(
                     controller: _title,
                     child: TextFormField(
                       controller: _title,
+                      inputFormatters: [textOnlyFormatter],
                       decoration: const InputDecoration(
                         labelText: 'عنوان فرصت *',
                         prefixIcon: Icon(Icons.track_changes_rounded),
@@ -440,99 +417,69 @@ class _OpportunityEditorState extends State<_OpportunityEditor> {
                     ),
                   ),
                 ),
-                SizedBox(
-                  width: 278,
+                ResponsiveFormField(
                   child: DropdownButtonFormField<String>(
                     initialValue: _stage,
+                    isExpanded: true,
                     decoration: const InputDecoration(labelText: 'مرحله فروش'),
-                    items: const [
-                      DropdownMenuItem(
-                        value: 'تماس اولیه',
-                        child: Text('تماس اولیه'),
-                      ),
-                      DropdownMenuItem(
-                        value: 'نیازسنجی',
-                        child: Text('نیازسنجی'),
-                      ),
-                      DropdownMenuItem(
-                        value: 'پیش‌فاکتور',
-                        child: Text('پیش‌فاکتور'),
-                      ),
-                      DropdownMenuItem(value: 'مذاکره', child: Text('مذاکره')),
-                      DropdownMenuItem(
-                        value: 'برنده شده',
-                        child: Text('برنده شده'),
-                      ),
-                      DropdownMenuItem(
-                        value: 'از دست رفته',
-                        child: Text('از دست رفته'),
-                      ),
-                    ],
-                    onChanged: (value) {
-                      setState(() {
-                        _stage = value ?? _stage;
-                      });
-                    },
+                    items: stages
+                        .map(
+                          (item) =>
+                              DropdownMenuItem(value: item, child: Text(item)),
+                        )
+                        .toList(),
+                    onChanged: (value) =>
+                        setState(() => _stage = value ?? _stage),
                   ),
                 ),
-                SizedBox(
-                  width: 278,
+                ResponsiveFormField(
                   child: AutoInputDirection(
                     controller: _amount,
                     child: TextFormField(
                       controller: _amount,
                       keyboardType: TextInputType.number,
+                      inputFormatters: const [persianNumberFormatter],
                       decoration: const InputDecoration(
-                        labelText: 'مبلغ احتمالی (تومان)',
+                        labelText: 'مبلغ احتمالی (ریال)',
                       ),
-                      validator: (value) {
-                        if (value == null || value.trim().isEmpty) {
-                          return 'مبلغ را وارد کنید.';
-                        }
-                        return null;
-                      },
+                      validator: (value) =>
+                          value == null || value.trim().isEmpty
+                          ? 'مبلغ را وارد کنید.'
+                          : null,
                     ),
                   ),
                 ),
-                SizedBox(
-                  width: double.infinity,
+                ResponsiveFormField.full(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'احتمال موفقیت: ' +
-                            _probability.round().toString() +
-                            '%',
+                        'احتمال موفقیت: ${formatPersianInteger(_probability.round())}٪',
                       ),
                       Slider(
                         value: _probability,
                         min: 0,
                         max: 100,
                         divisions: 20,
-                        label: _probability.round().toString() + '%',
-                        onChanged: (value) {
-                          setState(() {
-                            _probability = value;
-                          });
-                        },
+                        label: '${formatPersianInteger(_probability.round())}٪',
+                        onChanged: (value) =>
+                            setState(() => _probability = value),
                       ),
                     ],
                   ),
                 ),
-                SizedBox(
-                  width: double.infinity,
+                ResponsiveFormField.full(
                   child: OutlinedButton.icon(
                     onPressed: _pickDate,
                     icon: const Icon(Icons.event_outlined),
                     label: Text(
                       _expectedClose == null
                           ? 'تعیین تاریخ هدف'
-                          : 'تاریخ هدف: ' + compactDate(_expectedClose!),
+                          : 'تاریخ هدف: ${compactDate(_expectedClose!)}',
                     ),
                   ),
                 ),
-                SizedBox(
-                  width: double.infinity,
+                ResponsiveFormField.full(
                   child: AutoInputDirection(
                     controller: _notes,
                     child: TextFormField(
@@ -565,7 +512,9 @@ class _OpportunityEditorState extends State<_OpportunityEditor> {
                   child: CircularProgressIndicator(strokeWidth: 2),
                 )
               : const Icon(Icons.save_outlined),
-          label: const Text('ذخیره فرصت'),
+          label: Text(
+            widget.opportunity == null ? 'ثبت فرصت' : 'ذخیره تغییرات',
+          ),
         ),
       ],
     );

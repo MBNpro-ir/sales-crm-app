@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../core/persian_format.dart';
 
@@ -180,6 +181,205 @@ class AutoInputDirection extends StatelessWidget {
       ),
     );
   }
+}
+
+/// Normalizes Persian/Arabic/Latin digits, rejects non-numeric characters and
+/// renders a live three-digit grouping separator. Stored values should be read
+/// with [parsePersianInt], which understands this representation.
+class PersianNumberFormatter extends TextInputFormatter {
+  const PersianNumberFormatter({this.allowNegative = false});
+
+  final bool allowNegative;
+
+  @override
+  TextEditingValue formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) {
+    var normalized = toEnglishDigits(
+      newValue.text,
+    ).replaceAll(RegExp(r'[^0-9-]'), '');
+    if (!allowNegative) normalized = normalized.replaceAll('-', '');
+    if (allowNegative && normalized.indexOf('-') > 0) {
+      normalized = normalized.replaceAll('-', '');
+    }
+    if (normalized == '-' || normalized.isEmpty) {
+      return TextEditingValue(
+        text: normalized == '-' && allowNegative ? '−' : '',
+        selection: TextSelection.collapsed(offset: normalized.isEmpty ? 0 : 1),
+      );
+    }
+    final number = int.tryParse(normalized) ?? 0;
+    final value = formatPersianInteger(number, grouping: true);
+    return TextEditingValue(
+      text: value,
+      selection: TextSelection.collapsed(offset: value.length),
+    );
+  }
+}
+
+/// Restricts a field that represents a human-readable title/name to letters,
+/// whitespace and the usual Persian punctuation. Identifiers, URLs and phone
+/// fields deliberately use their own input type and are not passed here.
+final textOnlyFormatter = FilteringTextInputFormatter.allow(
+  RegExp(r"[a-zA-Z\u0600-\u06FF\s\-_.،()\u200c]"),
+);
+
+const persianNumberFormatter = PersianNumberFormatter();
+
+class ResponsiveFormField extends StatelessWidget {
+  const ResponsiveFormField({
+    super.key,
+    required this.child,
+    this.full = false,
+  });
+
+  final Widget child;
+  final bool full;
+
+  const ResponsiveFormField.full({super.key, required this.child})
+    : full = true;
+
+  @override
+  Widget build(BuildContext context) => child;
+}
+
+/// A predictable two-column dialog form that becomes one column when space is
+/// tight. It eliminates fixed-width Wrap overflows and keeps form controls
+/// aligned in RTL dialogs.
+class ResponsiveFormGrid extends StatelessWidget {
+  const ResponsiveFormGrid({
+    super.key,
+    required this.children,
+    this.spacing = 12,
+    this.runSpacing = 12,
+    this.breakpoint = 500,
+  });
+
+  final List<ResponsiveFormField> children;
+  final double spacing;
+  final double runSpacing;
+  final double breakpoint;
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final twoColumns = constraints.maxWidth >= breakpoint;
+        final width = twoColumns
+            ? (constraints.maxWidth - spacing) / 2
+            : constraints.maxWidth;
+        return Wrap(
+          spacing: spacing,
+          runSpacing: runSpacing,
+          children: children
+              .map(
+                (item) => SizedBox(
+                  width: item.full ? constraints.maxWidth : width,
+                  child: item,
+                ),
+              )
+              .toList(),
+        );
+      },
+    );
+  }
+}
+
+/// Provides a visible horizontal scrollbar for wide data tables. The scroll
+/// controller is kept in state so the thumb remains available on Windows.
+class CrmTableScroll extends StatefulWidget {
+  const CrmTableScroll({super.key, required this.child});
+
+  final Widget child;
+
+  @override
+  State<CrmTableScroll> createState() => _CrmTableScrollState();
+}
+
+class _CrmTableScrollState extends State<CrmTableScroll> {
+  final _horizontal = ScrollController();
+
+  @override
+  void dispose() {
+    _horizontal.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scrollbar(
+      controller: _horizontal,
+      thumbVisibility: true,
+      interactive: true,
+      child: SingleChildScrollView(
+        controller: _horizontal,
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.only(bottom: 10),
+        child: widget.child,
+      ),
+    );
+  }
+}
+
+class RecordActions extends StatelessWidget {
+  const RecordActions({
+    super.key,
+    required this.onEdit,
+    required this.onDelete,
+    this.editTooltip = 'ویرایش',
+  });
+
+  final VoidCallback onEdit;
+  final VoidCallback onDelete;
+  final String editTooltip;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        IconButton(
+          tooltip: editTooltip,
+          onPressed: onEdit,
+          icon: const Icon(Icons.edit_outlined),
+        ),
+        IconButton(
+          tooltip: 'حذف',
+          color: Theme.of(context).colorScheme.error,
+          onPressed: onDelete,
+          icon: const Icon(Icons.delete_outline_rounded),
+        ),
+      ],
+    );
+  }
+}
+
+Future<bool> confirmDelete(
+  BuildContext context, {
+  required String label,
+}) async {
+  return await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('انتقال به حذف‌شده‌ها'),
+          content: Text(
+            '«$label» از فهرست پنهان و با سرور همگام‌سازی می‌شود. ادامه می‌دهید؟',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('انصراف'),
+            ),
+            FilledButton.tonalIcon(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              icon: const Icon(Icons.delete_outline_rounded),
+              label: const Text('حذف'),
+            ),
+          ],
+        ),
+      ) ??
+      false;
 }
 
 class SoftEntrance extends StatelessWidget {

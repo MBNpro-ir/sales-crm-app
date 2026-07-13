@@ -1,11 +1,10 @@
-name: Pre-release 0.0.2-alpha (Windows)
+name: Pre-release 0.0.3-alpha (Windows)
 
 run-name: Windows pre-release from ${{ github.ref_name }} @ ${{ github.sha }}
 
 on:
   push:
-    branches:
-      - main
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -13,14 +12,14 @@ permissions:
   actions: write
 
 concurrency:
-  group: prerelease-v0.0.2-alpha
+  group: prerelease-v0.0.3-alpha
   cancel-in-progress: true
 
 jobs:
   build-windows:
-    name: Test and build Windows app
+    name: Test and build Windows app plus updater
     runs-on: windows-latest
-    timeout-minutes: 45
+    timeout-minutes: 55
 
     steps:
       - name: Check out source
@@ -32,6 +31,11 @@ jobs:
           channel: stable
           cache: true
           pub-cache: true
+
+      - name: Set up .NET SDK cache
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
 
       - name: Resolve dependencies
         run: flutter pub get
@@ -45,13 +49,32 @@ jobs:
       - name: Build Windows release
         run: >-
           flutter build windows --release
-          --build-name=0.0.2
+          --build-name=0.0.3
           --build-number=${{ github.run_number }}
+          --dart-define=APP_VERSION=0.0.3-alpha
+          --dart-define=BUILD_SHA=${{ github.sha }}
+          --dart-define=UPDATE_REPOSITORY=${{ github.repository }}
+
+      - name: Build standalone updater
+        shell: pwsh
+        run: >-
+          dotnet publish updater/SalesCrmUpdater.csproj
+          --configuration Release
+          --runtime win-x64
+          --self-contained true
+          -p:PublishSingleFile=true
+          --output build/updater
+
+      - name: Include updater with CRM
+        shell: pwsh
+        run: >-
+          Copy-Item build/updater/sales_crm_updater.exe
+          build/windows/x64/runner/Release/sales_crm_updater.exe -Force
 
       - name: Package Windows release
         shell: pwsh
         run: |
-          $package = Join-Path $env:GITHUB_WORKSPACE 'sales-crm-windows-0.0.2-alpha.zip'
+          $package = Join-Path $env:GITHUB_WORKSPACE 'sales-crm-windows-0.0.3-alpha.zip'
           if (Test-Path -LiteralPath $package) {
             Remove-Item -LiteralPath $package -Force
           }
@@ -60,11 +83,13 @@ jobs:
             -DestinationPath $package `
             -CompressionLevel Optimal
 
-      - name: Upload Windows artifact
+      - name: Upload Windows release assets
         uses: actions/upload-artifact@v4
         with:
-          name: windows-package
-          path: sales-crm-windows-0.0.2-alpha.zip
+          name: windows-release-assets
+          path: |
+            sales-crm-windows-0.0.3-alpha.zip
+            build/updater/sales_crm_updater.exe
           if-no-files-found: error
           retention-days: 14
 
@@ -80,15 +105,15 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Download Windows artifact
+      - name: Download Windows release assets
         uses: actions/download-artifact@v4
         with:
-          name: windows-package
+          name: windows-release-assets
           path: dist
 
       - name: Create or move release tag
         env:
-          TAG: v0.0.2-alpha
+          TAG: v0.0.3-alpha
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
@@ -99,31 +124,36 @@ jobs:
       - name: Create or update pre-release
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: v0.0.2-alpha
+          TAG: v0.0.3-alpha
           SHA: ${{ github.sha }}
           RUN_ID: ${{ github.run_id }}
+          REPOSITORY: ${{ github.repository }}
         run: |
-          asset="$(find dist -maxdepth 1 -type f -name '*.zip' -print -quit)"
-          test -n "$asset"
-          sha256sum "$asset" > dist/SHA256SUMS.txt
-          notes="Automated Windows pre-release for 0.0.2-alpha.
+          package="$(find dist -maxdepth 1 -type f -name '*.zip' -print -quit)"
+          updater="$(find dist -maxdepth 1 -type f -name 'sales_crm_updater.exe' -print -quit)"
+          test -n "$package"
+          test -n "$updater"
+          sha="$(sha256sum "$package" | awk '{print $1}')"
+          sha256sum "$package" "$updater" > dist/SHA256SUMS.txt
+          package_name="$(basename "$package")"
+          cat > dist/sales-crm-update.json <<EOF
+          {
+            "version": "0.0.3-alpha",
+            "build_sha": "$SHA",
+            "package_url": "https://github.com/$REPOSITORY/releases/download/$TAG/$package_name",
+            "sha256": "$sha"
+          }
+          EOF
+          notes="Automated Windows pre-release for 0.0.3-alpha.
 
           Commit: $SHA
           Workflow run: $RUN_ID
-          This release is refreshed after every push to main."
+          Includes the standalone Windows updater and an update manifest."
 
           if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release edit "$TAG" \
-              --title 'Sales CRM 0.0.2-alpha' \
-              --notes "$notes" \
-              --prerelease \
-              --target "$SHA"
-            gh release upload "$TAG" "$asset" dist/SHA256SUMS.txt --clobber
+            gh release edit "$TAG" --title 'Sales CRM 0.0.3-alpha' --notes "$notes" --prerelease --target "$SHA"
+            gh release upload "$TAG" "$package" "$updater" dist/SHA256SUMS.txt dist/sales-crm-update.json --clobber
           else
-            gh release create "$TAG" "$asset" dist/SHA256SUMS.txt \
-              --title 'Sales CRM 0.0.2-alpha' \
-              --notes "$notes" \
-              --prerelease \
-              --latest=false \
-              --verify-tag
+            gh release create "$TAG" "$package" "$updater" dist/SHA256SUMS.txt dist/sales-crm-update.json \
+              --title 'Sales CRM 0.0.3-alpha' --notes "$notes" --prerelease --latest=false --verify-tag
           fi

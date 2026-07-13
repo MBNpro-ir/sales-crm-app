@@ -26,11 +26,11 @@ class ApiClient {
     return headers;
   }
 
-  Future<AuthSession> login(String email, String password) async {
+  Future<AuthSession> login(String identifier, String password) async {
     final response = await _client.post(
       Uri.parse(baseUrl + '/auth/login'),
       headers: _headers,
-      body: jsonEncode({'email': email, 'password': password}),
+      body: jsonEncode({'identifier': identifier, 'password': password}),
     );
     if (response.statusCode != 200) {
       throw ApiException(_errorText(response));

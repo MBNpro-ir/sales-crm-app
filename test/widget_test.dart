@@ -53,7 +53,7 @@ void main() {
 
   test('input direction follows Persian, Latin and numbers', () {
     expect(inputTextDirection('سلام'), TextDirection.rtl);
-    expect(inputTextDirection('CRM 0.0.2'), TextDirection.ltr);
+    expect(inputTextDirection('CRM 0.0.3'), TextDirection.ltr);
     expect(inputTextDirection('۱۲۳۴۵'), TextDirection.ltr);
   });
 }

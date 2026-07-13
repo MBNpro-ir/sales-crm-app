@@ -105,40 +105,44 @@ class _AppShellState extends State<AppShell> {
       drawer: compact ? Drawer(width: 292, child: sidebar) : null,
       body: Directionality(
         textDirection: TextDirection.ltr,
-        child: Row(
-          children: [
-            Expanded(
-              child: Directionality(
-                textDirection: TextDirection.rtl,
-                child: Column(
-                  children: [
-                    _TopBar(
-                      store: widget.store,
-                      sidebarCollapsed: widget.store.sidebarCollapsed,
-                      onMenuPressed: compact
-                          ? () => _scaffoldKey.currentState?.openDrawer()
-                          : () => widget.store.setSidebarCollapsed(
-                              !widget.store.sidebarCollapsed,
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            return Row(
+              children: [
+                Expanded(
+                  child: Directionality(
+                    textDirection: TextDirection.rtl,
+                    child: Column(
+                      children: [
+                        _TopBar(
+                          store: widget.store,
+                          sidebarCollapsed: widget.store.sidebarCollapsed,
+                          onMenuPressed: compact
+                              ? () => _scaffoldKey.currentState?.openDrawer()
+                              : () => widget.store.setSidebarCollapsed(
+                                  !widget.store.sidebarCollapsed,
+                                ),
+                          compact: compact,
+                        ),
+                        Expanded(
+                          child: Padding(
+                            padding: EdgeInsets.all(
+                              widget.store.largeTouchTargets ? 28 : 24,
                             ),
-                      compact: compact,
-                    ),
-                    Expanded(
-                      child: Padding(
-                        padding: EdgeInsets.all(
-                          widget.store.largeTouchTargets ? 28 : 24,
+                            child: SoftPageSwitcher(
+                              pageId: _selectedIndex,
+                              child: _page(),
+                            ),
+                          ),
                         ),
-                        child: SoftPageSwitcher(
-                          pageId: _selectedIndex,
-                          child: _page(),
-                        ),
-                      ),
+                      ],
                     ),
-                  ],
+                  ),
                 ),
-              ),
-            ),
-            if (!compact) sidebar,
-          ],
+                if (!compact) sidebar,
+              ],
+            );
+          },
         ),
       ),
     );
@@ -163,98 +167,140 @@ class _TopBar extends StatelessWidget {
     final theme = Theme.of(context);
     return Material(
       color: theme.colorScheme.surface,
-      child: Container(
-        height: store.largeTouchTargets ? 86 : 76,
-        padding: const EdgeInsets.symmetric(horizontal: 18),
-        decoration: BoxDecoration(
-          border: Border(
-            bottom: BorderSide(
-              color: theme.dividerColor.withValues(alpha: 0.65),
-            ),
-          ),
-        ),
-        child: Row(
-          children: [
-            Semantics(
-              button: true,
-              label: compact
-                  ? 'باز کردن منوی اصلی'
-                  : 'جمع یا باز کردن منوی اصلی',
-              child: IconButton(
-                onPressed: onMenuPressed,
-                tooltip: compact ? 'منو' : 'جمع یا باز کردن منو',
-                icon: Icon(
-                  compact
-                      ? Icons.menu_rounded
-                      : sidebarCollapsed
-                      ? Icons.keyboard_double_arrow_left_rounded
-                      : Icons.keyboard_double_arrow_right_rounded,
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final narrow = compact || constraints.maxWidth < 760;
+          return Container(
+            height: store.largeTouchTargets ? 86 : 76,
+            padding: const EdgeInsets.symmetric(horizontal: 18),
+            decoration: BoxDecoration(
+              border: Border(
+                bottom: BorderSide(
+                  color: theme.dividerColor.withValues(alpha: 0.65),
                 ),
               ),
             ),
-            const SizedBox(width: 6),
-            Icon(
-              Icons.search_rounded,
-              color: theme.colorScheme.onSurfaceVariant,
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                'جست‌وجو در مشتریان، فعالیت‌ها و فرصت‌های فروش',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: theme.textTheme.bodyMedium?.copyWith(
-                  color: theme.colorScheme.onSurfaceVariant,
+            child: Row(
+              children: [
+                Semantics(
+                  button: true,
+                  label: compact
+                      ? 'باز کردن منوی اصلی'
+                      : 'جمع یا باز کردن منوی اصلی',
+                  child: IconButton(
+                    onPressed: onMenuPressed,
+                    tooltip: compact ? 'منو' : 'جمع یا باز کردن منو',
+                    icon: Icon(
+                      compact
+                          ? Icons.menu_rounded
+                          : sidebarCollapsed
+                          ? Icons.keyboard_double_arrow_left_rounded
+                          : Icons.keyboard_double_arrow_right_rounded,
+                    ),
+                  ),
                 ),
-              ),
-            ),
-            Tooltip(
-              message: 'تغییر سریع حالت روشن یا تیره',
-              child: IconButton(
-                onPressed: store.toggleTheme,
-                icon: Icon(
-                  store.themeMode == ThemeMode.dark
-                      ? Icons.light_mode_outlined
-                      : Icons.dark_mode_outlined,
-                ),
-              ),
-            ),
-            const SizedBox(width: 4),
-            Semantics(
-              button: true,
-              label: store.syncing
-                  ? 'همگام‌سازی در حال انجام است'
-                  : 'همگام‌سازی داده‌ها',
-              child: FilledButton.tonalIcon(
-                onPressed: store.syncing
-                    ? null
-                    : () async {
-                        await store.sync();
-                        if (!context.mounted) return;
-                        showCrmNotice(
-                          context,
-                          store.syncMessage,
-                          type: store.online
-                              ? CrmNoticeType.success
-                              : CrmNoticeType.warning,
-                        );
-                      },
-                icon: store.syncing
-                    ? const SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : Icon(
-                        store.online
-                            ? Icons.cloud_sync_outlined
-                            : Icons.cloud_off_outlined,
+                if (!narrow) ...[
+                  const SizedBox(width: 6),
+                  Icon(
+                    Icons.search_rounded,
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'جست‌وجو در مشتریان، فعالیت‌ها و فرصت‌های فروش',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
                       ),
-                label: Text(store.syncing ? 'در حال همگام‌سازی' : 'همگام‌سازی'),
-              ),
+                    ),
+                  ),
+                ] else
+                  const Spacer(),
+                Tooltip(
+                  message: 'تغییر سریع حالت روشن یا تیره',
+                  child: IconButton(
+                    onPressed: store.toggleTheme,
+                    icon: Icon(
+                      store.themeMode == ThemeMode.dark
+                          ? Icons.light_mode_outlined
+                          : Icons.dark_mode_outlined,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 4),
+                Semantics(
+                  button: true,
+                  label: store.syncing
+                      ? 'همگام‌سازی در حال انجام است'
+                      : 'همگام‌سازی داده‌ها',
+                  child: narrow
+                      ? IconButton.filledTonal(
+                          tooltip: 'همگام‌سازی',
+                          onPressed: store.syncing
+                              ? null
+                              : () async {
+                                  await store.sync();
+                                  if (!context.mounted) return;
+                                  showCrmNotice(
+                                    context,
+                                    store.syncMessage,
+                                    type: store.online
+                                        ? CrmNoticeType.success
+                                        : CrmNoticeType.warning,
+                                  );
+                                },
+                          icon: store.syncing
+                              ? const SizedBox(
+                                  width: 16,
+                                  height: 16,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                )
+                              : Icon(
+                                  store.online
+                                      ? Icons.cloud_sync_outlined
+                                      : Icons.cloud_off_outlined,
+                                ),
+                        )
+                      : FilledButton.tonalIcon(
+                          onPressed: store.syncing
+                              ? null
+                              : () async {
+                                  await store.sync();
+                                  if (!context.mounted) return;
+                                  showCrmNotice(
+                                    context,
+                                    store.syncMessage,
+                                    type: store.online
+                                        ? CrmNoticeType.success
+                                        : CrmNoticeType.warning,
+                                  );
+                                },
+                          icon: store.syncing
+                              ? const SizedBox(
+                                  width: 16,
+                                  height: 16,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                )
+                              : Icon(
+                                  store.online
+                                      ? Icons.cloud_sync_outlined
+                                      : Icons.cloud_off_outlined,
+                                ),
+                          label: Text(
+                            store.syncing ? 'در حال همگام‌سازی' : 'همگام‌سازی',
+                          ),
+                        ),
+                ),
+              ],
             ),
-          ],
-        ),
+          );
+        },
       ),
     );
   }

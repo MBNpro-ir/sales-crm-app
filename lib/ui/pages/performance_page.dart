@@ -77,8 +77,7 @@ class PerformancePage extends StatelessWidget {
                   message:
                       'با ثبت فرصت و وظیفه برای کارشناسان، گزارش عملکرد ایجاد می‌شود.',
                 )
-              : SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
+              : CrmTableScroll(
                   child: DataTable(
                     headingRowColor: WidgetStatePropertyAll(
                       Theme.of(context).colorScheme.surfaceContainerHighest,

@@ -39,13 +39,10 @@ String formatPersianInteger(int value, {bool grouping = false}) {
 }
 
 String formatCompactMoney(int amount) {
-  if (amount >= 1000000000) {
-    return '${toPersianDigits((amount / 1000000000).toStringAsFixed(1))} میلیارد تومان';
-  }
-  if (amount >= 1000000) {
-    return '${toPersianDigits((amount / 1000000).toStringAsFixed(1))} میلیون تومان';
-  }
-  return '${formatPersianInteger(amount, grouping: true)} تومان';
+  // Values are stored and displayed in ریال throughout the product.  Keeping
+  // the full grouped number also avoids an ambiguous abbreviated amount in
+  // invoices, orders and audit tables.
+  return '${formatPersianInteger(amount, grouping: true)} ریال';
 }
 
 String formatJalaliDate(DateTime value, {bool includeTime = false}) {

@@ -14,20 +14,20 @@ class LoginPage extends StatefulWidget {
 
 class _LoginPageState extends State<LoginPage> {
   final _formKey = GlobalKey<FormState>();
-  final _email = TextEditingController();
+  final _identifier = TextEditingController();
   final _password = TextEditingController();
   bool _obscurePassword = true;
 
   @override
   void dispose() {
-    _email.dispose();
+    _identifier.dispose();
     _password.dispose();
     super.dispose();
   }
 
   Future<void> _login() async {
     if (!_formKey.currentState!.validate()) return;
-    final error = await widget.store.login(_email.text, _password.text);
+    final error = await widget.store.login(_identifier.text, _password.text);
     if (!mounted || error == null) return;
     showCrmNotice(context, error, type: CrmNoticeType.error);
   }
@@ -91,17 +91,17 @@ class _LoginPageState extends State<LoginPage> {
                           ),
                           const SizedBox(height: 30),
                           AutoInputDirection(
-                            controller: _email,
+                            controller: _identifier,
                             child: TextFormField(
-                              controller: _email,
-                              keyboardType: TextInputType.emailAddress,
+                              controller: _identifier,
+                              keyboardType: TextInputType.text,
                               decoration: const InputDecoration(
-                                labelText: 'ایمیل',
-                                prefixIcon: Icon(Icons.alternate_email_rounded),
+                                labelText: 'نام کاربری یا ایمیل',
+                                prefixIcon: Icon(Icons.person_outline_rounded),
                               ),
                               validator: (value) {
-                                if (value == null || !value.contains('@')) {
-                                  return 'یک ایمیل معتبر وارد کنید.';
+                                if (value == null || value.trim().isEmpty) {
+                                  return 'نام کاربری یا ایمیل را وارد کنید.';
                                 }
                                 return null;
                               },

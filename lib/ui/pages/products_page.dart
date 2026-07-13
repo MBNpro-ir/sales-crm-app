@@ -1,29 +1,95 @@
 import 'package:flutter/material.dart';
 
 import '../../core/crm_store.dart';
+import '../../core/models.dart';
 import '../widgets/common.dart';
 
-class ProductsPage extends StatelessWidget {
+class ProductsPage extends StatefulWidget {
   const ProductsPage({super.key, required this.store});
 
   final CrmStore store;
 
-  Future<void> _openEditor(BuildContext context) async {
+  @override
+  State<ProductsPage> createState() => _ProductsPageState();
+}
+
+class _ProductsPageState extends State<ProductsPage> {
+  final _search = TextEditingController();
+  int _sortColumn = 0;
+  bool _sortAscending = true;
+
+  @override
+  void dispose() {
+    _search.dispose();
+    super.dispose();
+  }
+
+  Future<void> _openEditor([CrmProduct? product]) async {
     final saved = await showDialog<bool>(
       context: context,
-      builder: (context) => _ProductEditor(store: store),
+      builder: (context) =>
+          _ProductEditor(store: widget.store, product: product),
     );
-    if (saved == true && context.mounted) {
-      showCrmNotice(context, 'محصول ثبت شد.', type: CrmNoticeType.success);
+    if (!mounted || saved != true) return;
+    showCrmNotice(
+      context,
+      product == null ? 'محصول ثبت شد.' : 'محصول ویرایش شد.',
+      type: CrmNoticeType.success,
+    );
+  }
+
+  Future<void> _delete(CrmProduct product) async {
+    if (!await confirmDelete(context, label: product.name)) return;
+    await widget.store.deleteProduct(product);
+    if (mounted) {
+      showCrmNotice(
+        context,
+        'محصول حذف و همگام‌سازی شد.',
+        type: CrmNoticeType.warning,
+      );
     }
+  }
+
+  void _sort(int column) {
+    setState(() {
+      if (_sortColumn == column) {
+        _sortAscending = !_sortAscending;
+      } else {
+        _sortColumn = column;
+        _sortAscending = true;
+      }
+    });
   }
 
   @override
   Widget build(BuildContext context) {
-    final lowStock = store.products.where((product) => product.needsRestock);
-    final inventoryValue = store.products.fold(
+    final needle = _search.text.trim().toLowerCase();
+    final products = widget.store.products.where((item) {
+      return needle.isEmpty ||
+          item.name.toLowerCase().contains(needle) ||
+          item.sku.toLowerCase().contains(needle) ||
+          item.category.toLowerCase().contains(needle);
+    }).toList();
+    final values = <Comparable<Object?> Function(CrmProduct)>[
+      (item) => item.name,
+      (item) => item.sku,
+      (item) => item.category,
+      (item) => item.unitPrice,
+      (item) => item.stock,
+      (item) => item.isActive ? 1 : 0,
+    ];
+    products.sort((left, right) {
+      final result = values[_sortColumn](
+        left,
+      ).compareTo(values[_sortColumn](right));
+      return _sortAscending ? result : -result;
+    });
+    final lowStock = widget.store.products
+        .where((product) => product.needsRestock)
+        .toList();
+    final inventoryValue = widget.store.products.fold<int>(
       0,
-      (sum, product) => sum + (product.stock * product.unitPrice),
+      (sum, product) => sum + product.stock * product.unitPrice,
     );
     return ListView(
       children: [
@@ -33,7 +99,7 @@ class ProductsPage extends StatelessWidget {
               'کالاها، قیمت پایه و حداقل موجودی را برای فروش و خرید نگه دارید.',
           actions: [
             FilledButton.icon(
-              onPressed: () => _openEditor(context),
+              onPressed: _openEditor,
               icon: const Icon(Icons.add_box_outlined),
               label: const Text('محصول جدید'),
             ),
@@ -48,7 +114,7 @@ class ProductsPage extends StatelessWidget {
               width: 250,
               child: KpiCard(
                 title: 'محصولات فعال',
-                value: store.products
+                value: widget.store.products
                     .where((product) => product.isActive)
                     .length
                     .toString(),
@@ -66,7 +132,7 @@ class ProductsPage extends StatelessWidget {
               ),
             ),
             SizedBox(
-              width: 280,
+              width: 320,
               child: KpiCard(
                 title: 'ارزش تقریبی موجودی',
                 value: compactMoney(inventoryValue),
@@ -81,94 +147,135 @@ class ProductsPage extends StatelessWidget {
           SectionCard(
             title: 'هشدار موجودی',
             child: Column(
-              children: lowStock.map((product) {
-                return ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  leading: const Icon(
-                    Icons.warning_amber_rounded,
-                    color: Color(0xffd84b4b),
-                  ),
-                  title: Text(product.name),
-                  subtitle: Text(
-                    'موجودی ' +
-                        product.stock.toString() +
-                        ' ' +
-                        product.unit +
-                        '، حداقل ' +
-                        product.minStock.toString(),
-                  ),
-                  trailing: Text(
-                    'نیازمند تامین',
-                    style: TextStyle(
-                      color: Theme.of(context).colorScheme.error,
-                      fontWeight: FontWeight.w800,
+              children: lowStock
+                  .map(
+                    (product) => ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      leading: const Icon(
+                        Icons.warning_amber_rounded,
+                        color: Color(0xffd84b4b),
+                      ),
+                      title: Text(product.name),
+                      subtitle: Text(
+                        'موجودی ${formatPersianInteger(product.stock, grouping: true)} ${product.unit}، حداقل ${formatPersianInteger(product.minStock, grouping: true)}',
+                      ),
+                      trailing: Text(
+                        'نیازمند تأمین',
+                        style: TextStyle(
+                          color: Theme.of(context).colorScheme.error,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
                     ),
-                  ),
-                );
-              }).toList(),
+                  )
+                  .toList(),
             ),
           ),
           const SizedBox(height: 18),
         ],
         SectionCard(
+          title: 'جست‌وجوی کالا و خدمات',
+          child: AutoInputDirection(
+            controller: _search,
+            child: TextField(
+              controller: _search,
+              onChanged: (_) => setState(() {}),
+              decoration: const InputDecoration(
+                prefixIcon: Icon(Icons.search_rounded),
+                hintText: 'نام، کد یا دسته‌بندی',
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(height: 18),
+        SectionCard(
           title: 'فهرست کالا و خدمات',
-          child: store.products.isEmpty
+          trailing: Text('${formatPersianInteger(products.length)} مورد'),
+          child: products.isEmpty
               ? const EmptyState(
                   icon: Icons.inventory_2_outlined,
-                  title: 'محصولی ثبت نشده است',
+                  title: 'محصولی پیدا نشد',
                   message:
-                      'محصولات مورد استفاده در تماس، پیش‌فاکتور و سفارش را ثبت کنید.',
+                      'محصول جدیدی ثبت کنید یا عبارت جست‌وجو را تغییر دهید.',
                 )
-              : SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
+              : CrmTableScroll(
                   child: DataTable(
                     headingRowColor: WidgetStatePropertyAll(
                       Theme.of(context).colorScheme.surfaceContainerHighest,
                     ),
-                    columns: const [
-                      DataColumn(label: Text('محصول')),
-                      DataColumn(label: Text('کد')),
-                      DataColumn(label: Text('دسته')),
-                      DataColumn(label: Text('واحد')),
-                      DataColumn(label: Text('قیمت پایه')),
-                      DataColumn(label: Text('موجودی')),
-                      DataColumn(label: Text('وضعیت')),
+                    sortColumnIndex: _sortColumn,
+                    sortAscending: _sortAscending,
+                    columns: [
+                      DataColumn(
+                        label: const Text('محصول'),
+                        onSort: (_, _) => _sort(0),
+                      ),
+                      DataColumn(
+                        label: const Text('کد'),
+                        onSort: (_, _) => _sort(1),
+                      ),
+                      DataColumn(
+                        label: const Text('دسته'),
+                        onSort: (_, _) => _sort(2),
+                      ),
+                      const DataColumn(label: Text('واحد')),
+                      DataColumn(
+                        label: const Text('قیمت پایه (ریال)'),
+                        numeric: true,
+                        onSort: (_, _) => _sort(3),
+                      ),
+                      DataColumn(
+                        label: const Text('موجودی'),
+                        numeric: true,
+                        onSort: (_, _) => _sort(4),
+                      ),
+                      DataColumn(
+                        label: const Text('وضعیت'),
+                        onSort: (_, _) => _sort(5),
+                      ),
+                      const DataColumn(label: Text('عملیات')),
                     ],
-                    rows: store.products.map((product) {
-                      return DataRow(
-                        cells: [
-                          DataCell(
-                            SizedBox(
-                              width: 190,
-                              child: Text(
-                                product.name,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                          ),
-                          DataCell(Text(product.sku)),
-                          DataCell(Text(product.category)),
-                          DataCell(Text(product.unit)),
-                          DataCell(Text(compactMoney(product.unitPrice))),
-                          DataCell(
-                            Text(
-                              product.stock.toString() +
-                                  ' / حداقل ' +
-                                  product.minStock.toString(),
-                            ),
-                          ),
-                          DataCell(
-                            product.needsRestock
-                                ? const StatusPill(label: 'موجودی کم')
-                                : StatusPill(
-                                    label: product.isActive
-                                        ? 'فعال'
-                                        : 'غیر فعال',
+                    rows: products
+                        .map(
+                          (product) => DataRow(
+                            cells: [
+                              DataCell(
+                                SizedBox(
+                                  width: 190,
+                                  child: Text(
+                                    product.name,
+                                    overflow: TextOverflow.ellipsis,
                                   ),
+                                ),
+                              ),
+                              DataCell(Text(product.sku)),
+                              DataCell(Text(product.category)),
+                              DataCell(Text(product.unit)),
+                              DataCell(Text(compactMoney(product.unitPrice))),
+                              DataCell(
+                                Text(
+                                  '${formatPersianInteger(product.stock, grouping: true)} / حداقل ${formatPersianInteger(product.minStock, grouping: true)}',
+                                ),
+                              ),
+                              DataCell(
+                                product.needsRestock
+                                    ? const StatusPill(label: 'موجودی کم')
+                                    : StatusPill(
+                                        label: product.isActive
+                                            ? 'فعال'
+                                            : 'غیر فعال',
+                                      ),
+                              ),
+                              DataCell(
+                                RecordActions(
+                                  onEdit: () => _openEditor(product),
+                                  onDelete: () => _delete(product),
+                                ),
+                              ),
+                            ],
                           ),
-                        ],
-                      );
-                    }).toList(),
+                        )
+                        .toList(),
                   ),
                 ),
         ),
@@ -178,9 +285,10 @@ class ProductsPage extends StatelessWidget {
 }
 
 class _ProductEditor extends StatefulWidget {
-  const _ProductEditor({required this.store});
+  const _ProductEditor({required this.store, this.product});
 
   final CrmStore store;
+  final CrmProduct? product;
 
   @override
   State<_ProductEditor> createState() => _ProductEditorState();
@@ -192,11 +300,28 @@ class _ProductEditorState extends State<_ProductEditor> {
   final _sku = TextEditingController();
   final _category = TextEditingController(text: 'عمومی');
   final _unit = TextEditingController(text: 'عدد');
-  final _price = TextEditingController(text: '0');
-  final _stock = TextEditingController(text: '0');
-  final _minStock = TextEditingController(text: '0');
+  final _price = TextEditingController(text: '۰');
+  final _stock = TextEditingController(text: '۰');
+  final _minStock = TextEditingController(text: '۰');
   final _description = TextEditingController();
+  bool _active = true;
   bool _saving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    final product = widget.product;
+    if (product == null) return;
+    _name.text = product.name;
+    _sku.text = product.sku;
+    _category.text = product.category;
+    _unit.text = product.unit;
+    _price.text = formatPersianInteger(product.unitPrice, grouping: true);
+    _stock.text = formatPersianInteger(product.stock, grouping: true);
+    _minStock.text = formatPersianInteger(product.minStock, grouping: true);
+    _description.text = product.description;
+    _active = product.isActive;
+  }
 
   @override
   void dispose() {
@@ -211,24 +336,20 @@ class _ProductEditorState extends State<_ProductEditor> {
     super.dispose();
   }
 
-  int _number(TextEditingController controller) {
-    return parsePersianInt(controller.text);
-  }
-
   Future<void> _save() async {
     if (!_form.currentState!.validate()) return;
-    setState(() {
-      _saving = true;
-    });
+    setState(() => _saving = true);
     await widget.store.saveProduct(
+      id: widget.product?.id,
       name: _name.text,
       sku: _sku.text,
       category: _category.text,
       unit: _unit.text,
-      unitPrice: _number(_price),
-      stock: _number(_stock),
-      minStock: _number(_minStock),
+      unitPrice: parsePersianInt(_price.text),
+      stock: parsePersianInt(_stock.text),
+      minStock: parsePersianInt(_minStock.text),
       description: _description.text,
+      isActive: _active,
     );
     if (mounted) Navigator.of(context).pop(true);
   }
@@ -236,103 +357,43 @@ class _ProductEditorState extends State<_ProductEditor> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: const Text('ثبت محصول یا خدمت'),
-      content: SizedBox(
-        width: 580,
+      title: Text(
+        widget.product == null ? 'ثبت محصول یا خدمت' : 'ویرایش محصول یا خدمت',
+      ),
+      content: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 580),
         child: Form(
           key: _form,
           child: SingleChildScrollView(
-            child: Wrap(
-              spacing: 12,
-              runSpacing: 12,
+            child: ResponsiveFormGrid(
               children: [
-                SizedBox(
-                  width: 280,
-                  child: AutoInputDirection(
-                    controller: _name,
-                    child: TextFormField(
-                      controller: _name,
-                      decoration: const InputDecoration(
-                        labelText: 'نام محصول *',
-                      ),
-                      validator: (value) =>
-                          value == null || value.trim().isEmpty
-                          ? 'نام محصول الزامی است.'
-                          : null,
-                    ),
+                ResponsiveFormField(
+                  child: _textField(_name, 'نام محصول *', required: true),
+                ),
+                ResponsiveFormField(child: _plainTextField(_sku, 'کد محصول')),
+                ResponsiveFormField(child: _textField(_category, 'دسته‌بندی')),
+                ResponsiveFormField(child: _textField(_unit, 'واحد')),
+                ResponsiveFormField(
+                  child: _numberField(
+                    _price,
+                    'قیمت پایه (ریال)',
+                    required: true,
                   ),
                 ),
-                SizedBox(
-                  width: 280,
-                  child: AutoInputDirection(
-                    controller: _sku,
-                    child: TextFormField(
-                      controller: _sku,
-                      decoration: const InputDecoration(labelText: 'کد محصول'),
-                    ),
+                ResponsiveFormField(child: _numberField(_stock, 'موجودی فعلی')),
+                ResponsiveFormField(
+                  child: _numberField(_minStock, 'حداقل موجودی'),
+                ),
+                ResponsiveFormField.full(
+                  child: SwitchListTile.adaptive(
+                    contentPadding: EdgeInsets.zero,
+                    value: _active,
+                    onChanged: (value) => setState(() => _active = value),
+                    title: const Text('محصول فعال است'),
+                    secondary: const Icon(Icons.toggle_on_outlined),
                   ),
                 ),
-                SizedBox(
-                  width: 280,
-                  child: AutoInputDirection(
-                    controller: _category,
-                    child: TextFormField(
-                      controller: _category,
-                      decoration: const InputDecoration(labelText: 'دسته‌بندی'),
-                    ),
-                  ),
-                ),
-                SizedBox(
-                  width: 280,
-                  child: AutoInputDirection(
-                    controller: _unit,
-                    child: TextFormField(
-                      controller: _unit,
-                      decoration: const InputDecoration(labelText: 'واحد'),
-                    ),
-                  ),
-                ),
-                SizedBox(
-                  width: 280,
-                  child: AutoInputDirection(
-                    controller: _price,
-                    child: TextFormField(
-                      controller: _price,
-                      keyboardType: TextInputType.number,
-                      decoration: const InputDecoration(
-                        labelText: 'قیمت پایه (تومان)',
-                      ),
-                    ),
-                  ),
-                ),
-                SizedBox(
-                  width: 280,
-                  child: AutoInputDirection(
-                    controller: _stock,
-                    child: TextFormField(
-                      controller: _stock,
-                      keyboardType: TextInputType.number,
-                      decoration: const InputDecoration(
-                        labelText: 'موجودی فعلی',
-                      ),
-                    ),
-                  ),
-                ),
-                SizedBox(
-                  width: 280,
-                  child: AutoInputDirection(
-                    controller: _minStock,
-                    child: TextFormField(
-                      controller: _minStock,
-                      keyboardType: TextInputType.number,
-                      decoration: const InputDecoration(
-                        labelText: 'حداقل موجودی',
-                      ),
-                    ),
-                  ),
-                ),
-                SizedBox(
-                  width: double.infinity,
+                ResponsiveFormField.full(
                   child: AutoInputDirection(
                     controller: _description,
                     child: TextFormField(
@@ -358,9 +419,60 @@ class _ProductEditorState extends State<_ProductEditor> {
         ),
         FilledButton(
           onPressed: _saving ? null : _save,
-          child: Text(_saving ? 'در حال ذخیره' : 'ذخیره محصول'),
+          child: Text(_saving ? 'در حال ذخیره' : 'ذخیره'),
         ),
       ],
+    );
+  }
+
+  Widget _textField(
+    TextEditingController controller,
+    String label, {
+    bool required = false,
+  }) {
+    return AutoInputDirection(
+      controller: controller,
+      child: TextFormField(
+        controller: controller,
+        inputFormatters: [textOnlyFormatter],
+        decoration: InputDecoration(labelText: label),
+        validator: required
+            ? (value) => value == null || value.trim().isEmpty
+                  ? 'این فیلد الزامی است.'
+                  : null
+            : null,
+      ),
+    );
+  }
+
+  Widget _plainTextField(TextEditingController controller, String label) {
+    return AutoInputDirection(
+      controller: controller,
+      child: TextFormField(
+        controller: controller,
+        decoration: InputDecoration(labelText: label),
+      ),
+    );
+  }
+
+  Widget _numberField(
+    TextEditingController controller,
+    String label, {
+    bool required = false,
+  }) {
+    return AutoInputDirection(
+      controller: controller,
+      child: TextFormField(
+        controller: controller,
+        keyboardType: TextInputType.number,
+        inputFormatters: const [persianNumberFormatter],
+        decoration: InputDecoration(labelText: label),
+        validator: required
+            ? (value) => value == null || value.trim().isEmpty
+                  ? 'این فیلد الزامی است.'
+                  : null
+            : null,
+      ),
     );
   }
 }

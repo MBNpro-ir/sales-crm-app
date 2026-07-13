@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../core/crm_store.dart';
+import '../../core/update_service.dart';
 import '../widgets/common.dart';
 
 class SettingsPage extends StatelessWidget {
@@ -65,6 +66,8 @@ class SettingsPage extends StatelessWidget {
         const SizedBox(height: 18),
         _CloseBehaviorCard(store: store),
         const SizedBox(height: 18),
+        _UpdateCard(store: store),
+        const SizedBox(height: 18),
         _AccessibilityCard(store: store),
         const SizedBox(height: 18),
         SectionCard(
@@ -97,6 +100,106 @@ class SettingsPage extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+class _UpdateCard extends StatefulWidget {
+  const _UpdateCard({required this.store});
+
+  final CrmStore store;
+
+  @override
+  State<_UpdateCard> createState() => _UpdateCardState();
+}
+
+class _UpdateCardState extends State<_UpdateCard> {
+  final _updates = UpdateService();
+  bool _checking = false;
+
+  Future<void> _check() async {
+    setState(() => _checking = true);
+    try {
+      final update = await _updates.checkForUpdate();
+      if (!mounted) return;
+      if (update == null) {
+        showCrmNotice(
+          context,
+          'این نسخه به‌روز است یا بررسی در نسخهٔ توسعه غیرفعال است.',
+        );
+        return;
+      }
+      final install = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('به‌روزرسانی پیدا شد'),
+          content: Text('نسخهٔ ${update.version} آماده نصب است.'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('بعداً'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: const Text('نصب'),
+            ),
+          ],
+        ),
+      );
+      if (install == true) await _updates.install(update);
+    } catch (error) {
+      if (mounted) {
+        showCrmNotice(context, error.toString(), type: CrmNoticeType.error);
+      }
+    } finally {
+      if (mounted) setState(() => _checking = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SectionCard(
+      title: 'به‌روزرسانی برنامه',
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'نسخهٔ ${toPersianDigits(currentAppVersion)}',
+            style: Theme.of(
+              context,
+            ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w800),
+          ),
+          const SizedBox(height: 8),
+          const Text(
+            'بستهٔ دارای SHA-256 از pre-release گیت‌هاب دریافت می‌شود و برنامهٔ جداگانهٔ updater پس از بستن CRM فایل‌ها را جایگزین می‌کند.',
+          ),
+          const SizedBox(height: 10),
+          SwitchListTile.adaptive(
+            contentPadding: EdgeInsets.zero,
+            secondary: const Icon(Icons.system_update_alt_rounded),
+            value: widget.store.automaticUpdates,
+            onChanged: widget.store.setAutomaticUpdates,
+            title: const Text('بررسی خودکار به‌روزرسانی'),
+            subtitle: const Text(
+              'در شروع برنامه، نسخهٔ جدید بررسی و برای نصب پیشنهاد می‌شود.',
+            ),
+          ),
+          Align(
+            alignment: AlignmentDirectional.centerStart,
+            child: OutlinedButton.icon(
+              onPressed: _checking ? null : _check,
+              icon: _checking
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.refresh_rounded),
+              label: Text(_checking ? 'در حال بررسی' : 'بررسی اکنون'),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

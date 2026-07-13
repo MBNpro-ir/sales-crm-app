@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../core/crm_store.dart';
+import '../../core/models.dart';
 import '../widgets/common.dart';
 
 class CustomersPage extends StatefulWidget {
@@ -14,6 +15,8 @@ class CustomersPage extends StatefulWidget {
 
 class _CustomersPageState extends State<CustomersPage> {
   final _search = TextEditingController();
+  int _sortColumn = 0;
+  bool _sortAscending = true;
 
   @override
   void dispose() {
@@ -21,17 +24,42 @@ class _CustomersPageState extends State<CustomersPage> {
     super.dispose();
   }
 
-  Future<void> _openEditor() async {
+  Future<void> _openEditor([CrmCustomer? customer]) async {
     final saved = await showDialog<bool>(
       context: context,
-      builder: (context) => _CustomerEditorDialog(store: widget.store),
+      builder: (context) =>
+          _CustomerEditorDialog(store: widget.store, customer: customer),
     );
     if (!mounted || saved != true) return;
     showCrmNotice(
       context,
-      'مشتری در داده‌های محلی ثبت شد.',
+      customer == null ? 'مشتری ثبت شد.' : 'اطلاعات مشتری ویرایش شد.',
       type: CrmNoticeType.success,
     );
+  }
+
+  Future<void> _delete(CrmCustomer customer) async {
+    final label = customer.company.isEmpty ? customer.name : customer.company;
+    if (!await confirmDelete(context, label: label)) return;
+    await widget.store.deleteCustomer(customer);
+    if (mounted) {
+      showCrmNotice(
+        context,
+        'مشتری حذف و برای همگام‌سازی صف شد.',
+        type: CrmNoticeType.warning,
+      );
+    }
+  }
+
+  void _sort(int column) {
+    setState(() {
+      if (_sortColumn == column) {
+        _sortAscending = !_sortAscending;
+      } else {
+        _sortColumn = column;
+        _sortAscending = true;
+      }
+    });
   }
 
   @override
@@ -44,6 +72,19 @@ class _CustomersPageState extends State<CustomersPage> {
           customer.mobile.contains(needle) ||
           customer.city.toLowerCase().contains(needle);
     }).toList();
+    final comparators = <Comparable<Object?> Function(CrmCustomer)>[
+      (item) => item.company.isEmpty ? item.name : item.company,
+      (item) => item.mobile,
+      (item) => item.city,
+      (item) => item.status,
+      (item) => item.priority,
+    ];
+    rows.sort((left, right) {
+      final result = comparators[_sortColumn](
+        left,
+      ).compareTo(comparators[_sortColumn](right));
+      return _sortAscending ? result : -result;
+    });
     return ListView(
       children: [
         CrmPageHeader(
@@ -94,19 +135,36 @@ class _CustomersPageState extends State<CustomersPage> {
               ),
             ),
             padding: const EdgeInsets.all(12),
-            child: SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
+            child: CrmTableScroll(
               child: DataTable(
                 headingRowColor: WidgetStatePropertyAll(
                   Theme.of(context).colorScheme.surfaceContainerHighest,
                 ),
-                columns: const [
-                  DataColumn(label: Text('نام / شرکت')),
-                  DataColumn(label: Text('موبایل')),
-                  DataColumn(label: Text('شهر')),
-                  DataColumn(label: Text('نوع فعالیت')),
-                  DataColumn(label: Text('وضعیت')),
-                  DataColumn(label: Text('اولویت')),
+                sortColumnIndex: _sortColumn,
+                sortAscending: _sortAscending,
+                columns: [
+                  DataColumn(
+                    label: const Text('نام / شرکت'),
+                    onSort: (_, _) => _sort(0),
+                  ),
+                  DataColumn(
+                    label: const Text('موبایل'),
+                    onSort: (_, _) => _sort(1),
+                  ),
+                  DataColumn(
+                    label: const Text('شهر'),
+                    onSort: (_, _) => _sort(2),
+                  ),
+                  const DataColumn(label: Text('نوع فعالیت')),
+                  DataColumn(
+                    label: const Text('وضعیت'),
+                    onSort: (_, _) => _sort(3),
+                  ),
+                  DataColumn(
+                    label: const Text('اولویت'),
+                    onSort: (_, _) => _sort(4),
+                  ),
+                  const DataColumn(label: Text('عملیات')),
                 ],
                 rows: rows.map((customer) {
                   return DataRow(
@@ -140,6 +198,12 @@ class _CustomersPageState extends State<CustomersPage> {
                       DataCell(Text(customer.activityType)),
                       DataCell(StatusPill(label: customer.status)),
                       DataCell(Text(customer.priority)),
+                      DataCell(
+                        RecordActions(
+                          onEdit: () => _openEditor(customer),
+                          onDelete: () => _delete(customer),
+                        ),
+                      ),
                     ],
                   );
                 }).toList(),
@@ -152,9 +216,10 @@ class _CustomersPageState extends State<CustomersPage> {
 }
 
 class _CustomerEditorDialog extends StatefulWidget {
-  const _CustomerEditorDialog({required this.store});
+  const _CustomerEditorDialog({required this.store, this.customer});
 
   final CrmStore store;
+  final CrmCustomer? customer;
 
   @override
   State<_CustomerEditorDialog> createState() => _CustomerEditorDialogState();
@@ -185,6 +250,36 @@ class _CustomerEditorDialogState extends State<_CustomerEditorDialog> {
   String _status = 'فعال';
   String _priority = 'متوسط';
   bool _saving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    final customer = widget.customer;
+    if (customer == null) return;
+    _name.text = customer.name;
+    _company.text = customer.company;
+    _mobile.text = customer.mobile;
+    _phone.text = customer.phone;
+    _province.text = customer.province;
+    _city.text = customer.city;
+    _activity = customer.activityType;
+    _status = customer.status;
+    _priority = customer.priority;
+    _notes.text = customer.notes;
+    final details = customer.details;
+    _email.text = details['email'] ?? '';
+    _secondaryMobile.text = details['secondary_mobile'] ?? '';
+    _nationalId.text = details['national_id'] ?? '';
+    _district.text = details['district'] ?? '';
+    _address.text = details['address'] ?? '';
+    _postalCode.text = details['postal_code'] ?? '';
+    _source.text = details['source'] ?? '';
+    _interestedProducts.text = details['interested_products'] ?? '';
+    _monthlyVolume.text = details['monthly_volume'] ?? '';
+    _paymentTerms.text = details['payment_terms'] ?? '';
+    _fax.text = details['fax'] ?? '';
+    _website.text = details['website'] ?? '';
+  }
 
   @override
   void dispose() {
@@ -240,6 +335,7 @@ class _CustomerEditorDialogState extends State<_CustomerEditorDialog> {
         'fax': _fax.text.trim(),
         'website': _website.text.trim(),
       },
+      id: widget.customer?.id,
     );
     if (!mounted) return;
     Navigator.of(context).pop(true);
@@ -248,7 +344,7 @@ class _CustomerEditorDialogState extends State<_CustomerEditorDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: const Text('ثبت مشتری جدید'),
+      title: Text(widget.customer == null ? 'ثبت مشتری جدید' : 'ویرایش مشتری'),
       content: SizedBox(
         width: 620,
         child: Form(
@@ -262,6 +358,7 @@ class _CustomerEditorDialogState extends State<_CustomerEditorDialog> {
                   _name,
                   TextFormField(
                     controller: _name,
+                    inputFormatters: [textOnlyFormatter],
                     decoration: const InputDecoration(
                       labelText: 'نام مخاطب *',
                       prefixIcon: Icon(Icons.person_outline_rounded),
@@ -275,6 +372,7 @@ class _CustomerEditorDialogState extends State<_CustomerEditorDialog> {
                   _company,
                   TextFormField(
                     controller: _company,
+                    inputFormatters: [textOnlyFormatter],
                     decoration: const InputDecoration(
                       labelText: 'نام شرکت',
                       prefixIcon: Icon(Icons.business_outlined),
@@ -286,6 +384,7 @@ class _CustomerEditorDialogState extends State<_CustomerEditorDialog> {
                   TextFormField(
                     controller: _mobile,
                     keyboardType: TextInputType.phone,
+                    inputFormatters: const [persianNumberFormatter],
                     decoration: const InputDecoration(
                       labelText: 'شماره موبایل *',
                       prefixIcon: Icon(Icons.phone_android_rounded),
@@ -300,6 +399,7 @@ class _CustomerEditorDialogState extends State<_CustomerEditorDialog> {
                   TextFormField(
                     controller: _phone,
                     keyboardType: TextInputType.phone,
+                    inputFormatters: const [persianNumberFormatter],
                     decoration: const InputDecoration(
                       labelText: 'تلفن ثابت',
                       prefixIcon: Icon(Icons.phone_outlined),
@@ -322,6 +422,7 @@ class _CustomerEditorDialogState extends State<_CustomerEditorDialog> {
                   TextFormField(
                     controller: _secondaryMobile,
                     keyboardType: TextInputType.phone,
+                    inputFormatters: const [persianNumberFormatter],
                     decoration: const InputDecoration(
                       labelText: 'تلفن همراه دوم',
                       prefixIcon: Icon(Icons.phone_iphone_outlined),
@@ -333,6 +434,7 @@ class _CustomerEditorDialogState extends State<_CustomerEditorDialog> {
                   TextFormField(
                     controller: _nationalId,
                     keyboardType: TextInputType.number,
+                    inputFormatters: const [persianNumberFormatter],
                     decoration: const InputDecoration(
                       labelText: 'کد ملی / شناسه ملی',
                     ),
@@ -454,6 +556,7 @@ class _CustomerEditorDialogState extends State<_CustomerEditorDialog> {
                   TextFormField(
                     controller: _monthlyVolume,
                     keyboardType: TextInputType.number,
+                    inputFormatters: const [persianNumberFormatter],
                     decoration: const InputDecoration(
                       labelText: 'حدود تناژ / حجم ماهانه',
                     ),
@@ -482,6 +585,7 @@ class _CustomerEditorDialogState extends State<_CustomerEditorDialog> {
                   TextFormField(
                     controller: _postalCode,
                     keyboardType: TextInputType.number,
+                    inputFormatters: const [persianNumberFormatter],
                     decoration: const InputDecoration(labelText: 'کد پستی'),
                   ),
                 ),
@@ -505,6 +609,7 @@ class _CustomerEditorDialogState extends State<_CustomerEditorDialog> {
                   TextFormField(
                     controller: _fax,
                     keyboardType: TextInputType.phone,
+                    inputFormatters: const [persianNumberFormatter],
                     decoration: const InputDecoration(labelText: 'فکس'),
                   ),
                 ),
@@ -557,7 +662,7 @@ class _CustomerEditorDialogState extends State<_CustomerEditorDialog> {
   }
 
   Widget _wideField(Widget child) {
-    return SizedBox(width: 294, child: child);
+    return SizedBox(width: 272, child: child);
   }
 
   Widget _input(TextEditingController controller, Widget child) {

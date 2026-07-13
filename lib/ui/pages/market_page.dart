@@ -130,8 +130,7 @@ class MarketPage extends StatelessWidget {
                   message:
                       'برای مشتریان جدید اولویت و وضعیت ارتباط را ثبت کنید.',
                 )
-              : SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
+              : CrmTableScroll(
                   child: DataTable(
                     headingRowColor: WidgetStatePropertyAll(
                       Theme.of(context).colorScheme.surfaceContainerHighest,

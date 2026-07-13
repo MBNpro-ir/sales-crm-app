@@ -28,6 +28,7 @@ class CrmStore extends ChangeNotifier {
   bool _boldText = false;
   bool _largeTouchTargets = false;
   bool _sidebarCollapsed = false;
+  bool _automaticUpdates = true;
   CloseBehavior _closeBehavior = CloseBehavior.ask;
   List<CrmCustomer> _customers = const [];
   List<CrmCall> _calls = const [];
@@ -53,6 +54,7 @@ class CrmStore extends ChangeNotifier {
   bool get boldText => _boldText;
   bool get largeTouchTargets => _largeTouchTargets;
   bool get sidebarCollapsed => _sidebarCollapsed;
+  bool get automaticUpdates => _automaticUpdates;
   CloseBehavior get closeBehavior => _closeBehavior;
   List<CrmCustomer> get customers => List.unmodifiable(_customers);
   List<CrmCall> get calls => List.unmodifiable(_calls);
@@ -127,6 +129,7 @@ class CrmStore extends ChangeNotifier {
     _boldText = _preferences!.getBool('bold_text') ?? false;
     _largeTouchTargets = _preferences!.getBool('large_touch_targets') ?? false;
     _sidebarCollapsed = _preferences!.getBool('sidebar_collapsed') ?? false;
+    _automaticUpdates = _preferences!.getBool('automatic_updates') ?? true;
     final savedCloseBehavior = _preferences!.getString('close_behavior');
     _closeBehavior = CloseBehavior.values.firstWhere(
       (item) => item.name == savedCloseBehavior,
@@ -212,17 +215,23 @@ class CrmStore extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<void> setAutomaticUpdates(bool value) async {
+    _automaticUpdates = value;
+    await _preferences?.setBool('automatic_updates', value);
+    notifyListeners();
+  }
+
   Future<void> setCloseBehavior(CloseBehavior value) async {
     _closeBehavior = value;
     await _preferences?.setString('close_behavior', value.name);
     notifyListeners();
   }
 
-  Future<String?> login(String email, String password) async {
+  Future<String?> login(String identifier, String password) async {
     _busy = true;
     notifyListeners();
     try {
-      final session = await _api.login(email.trim(), password);
+      final session = await _api.login(identifier.trim(), password);
       _accessToken = session.accessToken;
       _api.accessToken = session.accessToken;
       _userName = session.userName;
@@ -320,7 +329,7 @@ class CrmStore extends ChangeNotifier {
       updatedAt: DateTime.now(),
     );
     await _database.saveCustomer(customer);
-    await refresh();
+    await _afterLocalMutation();
   }
 
   Future<void> saveCall({
@@ -337,10 +346,12 @@ class CrmStore extends ChangeNotifier {
     String productName = '',
     int quantity = 0,
     int unitPrice = 0,
+    String? id,
+    DateTime? callAt,
   }) async {
     final now = DateTime.now();
     final call = CrmCall(
-      id: _uuid.v4(),
+      id: id ?? _uuid.v4(),
       customerId: customer.id,
       customerName: customer.company.isEmpty ? customer.name : customer.company,
       subject: subject.trim(),
@@ -348,7 +359,7 @@ class CrmStore extends ChangeNotifier {
       direction: direction,
       status: status,
       notes: notes.trim(),
-      callAt: now,
+      callAt: callAt ?? now,
       durationMinutes: durationMinutes,
       amount: amount,
       tradeType: tradeType,
@@ -359,7 +370,7 @@ class CrmStore extends ChangeNotifier {
       updatedAt: now,
     );
     await _database.saveCall(call);
-    await refresh();
+    await _afterLocalMutation();
   }
 
   Future<void> saveProduct({
@@ -388,7 +399,7 @@ class CrmStore extends ChangeNotifier {
       updatedAt: DateTime.now(),
     );
     await _database.saveProduct(product);
-    await refresh();
+    await _afterLocalMutation();
   }
 
   Future<void> saveOpportunity({
@@ -415,7 +426,7 @@ class CrmStore extends ChangeNotifier {
       updatedAt: DateTime.now(),
     );
     await _database.saveOpportunity(opportunity);
-    await refresh();
+    await _afterLocalMutation();
   }
 
   Future<void> saveTask({
@@ -442,7 +453,7 @@ class CrmStore extends ChangeNotifier {
       updatedAt: DateTime.now(),
     );
     await _database.saveTask(task);
-    await refresh();
+    await _afterLocalMutation();
   }
 
   Future<void> completeTask(CrmTask task) async {
@@ -460,7 +471,7 @@ class CrmStore extends ChangeNotifier {
       updatedAt: DateTime.now(),
     );
     await _database.saveTask(completed);
-    await refresh();
+    await _afterLocalMutation();
   }
 
   Future<void> saveQuote({
@@ -470,13 +481,14 @@ class CrmStore extends ChangeNotifier {
     required String notes,
     DateTime? validUntil,
     String? id,
+    String? quoteNumber,
   }) async {
     final now = DateTime.now();
     final quote = CrmQuote(
       id: id ?? _uuid.v4(),
       customerId: customer.id,
       customerName: customer.company.isEmpty ? customer.name : customer.company,
-      quoteNumber: 'PF-' + now.millisecondsSinceEpoch.toString(),
+      quoteNumber: quoteNumber ?? 'PF-' + now.millisecondsSinceEpoch.toString(),
       status: status,
       totalAmount: totalAmount,
       notes: notes.trim(),
@@ -484,7 +496,7 @@ class CrmStore extends ChangeNotifier {
       updatedAt: now,
     );
     await _database.saveQuote(quote);
-    await refresh();
+    await _afterLocalMutation();
   }
 
   Future<void> saveOrder({
@@ -494,21 +506,160 @@ class CrmStore extends ChangeNotifier {
     required int totalAmount,
     required String notes,
     String? id,
+    String? orderNumber,
+    DateTime? orderAt,
   }) async {
     final now = DateTime.now();
     final order = CrmOrder(
       id: id ?? _uuid.v4(),
       customerId: customer.id,
       customerName: customer.company.isEmpty ? customer.name : customer.company,
-      orderNumber: 'SO-' + now.millisecondsSinceEpoch.toString(),
+      orderNumber: orderNumber ?? 'SO-' + now.millisecondsSinceEpoch.toString(),
       direction: direction,
       status: status,
       totalAmount: totalAmount,
       notes: notes.trim(),
-      orderAt: now,
+      orderAt: orderAt ?? now,
       updatedAt: now,
     );
     await _database.saveOrder(order);
+    await _afterLocalMutation();
+  }
+
+  Future<void> deleteCustomer(CrmCustomer item) async {
+    await _database.saveCustomer(
+      item.copyWith(deleted: true, updatedAt: DateTime.now()),
+    );
+    await _afterLocalMutation();
+  }
+
+  Future<void> deleteCall(CrmCall item) async {
+    await _database.saveCall(
+      CrmCall(
+        id: item.id,
+        customerId: item.customerId,
+        customerName: item.customerName,
+        subject: item.subject,
+        type: item.type,
+        direction: item.direction,
+        status: item.status,
+        notes: item.notes,
+        callAt: item.callAt,
+        durationMinutes: item.durationMinutes,
+        amount: item.amount,
+        nextFollowUp: item.nextFollowUp,
+        tradeType: item.tradeType,
+        productName: item.productName,
+        quantity: item.quantity,
+        unitPrice: item.unitPrice,
+        updatedAt: DateTime.now(),
+        deleted: true,
+      ),
+    );
+    await _afterLocalMutation();
+  }
+
+  Future<void> deleteProduct(CrmProduct item) async {
+    await _database.saveProduct(
+      CrmProduct(
+        id: item.id,
+        name: item.name,
+        sku: item.sku,
+        category: item.category,
+        unit: item.unit,
+        unitPrice: item.unitPrice,
+        stock: item.stock,
+        minStock: item.minStock,
+        description: item.description,
+        isActive: item.isActive,
+        updatedAt: DateTime.now(),
+        deleted: true,
+      ),
+    );
+    await _afterLocalMutation();
+  }
+
+  Future<void> deleteOpportunity(CrmOpportunity item) async {
+    await _database.saveOpportunity(
+      CrmOpportunity(
+        id: item.id,
+        customerId: item.customerId,
+        customerName: item.customerName,
+        title: item.title,
+        stage: item.stage,
+        amount: item.amount,
+        probability: item.probability,
+        notes: item.notes,
+        ownerName: item.ownerName,
+        expectedClose: item.expectedClose,
+        updatedAt: DateTime.now(),
+        deleted: true,
+      ),
+    );
+    await _afterLocalMutation();
+  }
+
+  Future<void> deleteTask(CrmTask item) async {
+    await _database.saveTask(
+      CrmTask(
+        id: item.id,
+        customerId: item.customerId,
+        customerName: item.customerName,
+        title: item.title,
+        taskType: item.taskType,
+        priority: item.priority,
+        status: item.status,
+        notes: item.notes,
+        dueAt: item.dueAt,
+        ownerName: item.ownerName,
+        updatedAt: DateTime.now(),
+        deleted: true,
+      ),
+    );
+    await _afterLocalMutation();
+  }
+
+  Future<void> deleteQuote(CrmQuote item) async {
+    await _database.saveQuote(
+      CrmQuote(
+        id: item.id,
+        customerId: item.customerId,
+        customerName: item.customerName,
+        quoteNumber: item.quoteNumber,
+        status: item.status,
+        totalAmount: item.totalAmount,
+        notes: item.notes,
+        validUntil: item.validUntil,
+        updatedAt: DateTime.now(),
+        deleted: true,
+      ),
+    );
+    await _afterLocalMutation();
+  }
+
+  Future<void> deleteOrder(CrmOrder item) async {
+    await _database.saveOrder(
+      CrmOrder(
+        id: item.id,
+        customerId: item.customerId,
+        customerName: item.customerName,
+        orderNumber: item.orderNumber,
+        direction: item.direction,
+        status: item.status,
+        totalAmount: item.totalAmount,
+        notes: item.notes,
+        orderAt: item.orderAt,
+        updatedAt: DateTime.now(),
+        deleted: true,
+      ),
+    );
+    await _afterLocalMutation();
+  }
+
+  Future<void> _afterLocalMutation() async {
     await refresh();
+    if (_online && hasSession) {
+      await sync(silent: true);
+    }
   }
 }

@@ -7,6 +7,7 @@ import 'package:window_manager/window_manager.dart';
 import 'package:windows_single_instance/windows_single_instance.dart';
 
 import 'core/crm_store.dart';
+import 'core/update_service.dart';
 import 'ui/app_shell.dart';
 import 'ui/desktop_window_controller.dart';
 import 'ui/login_page.dart';
@@ -23,7 +24,7 @@ Future<void> main(List<String> arguments) async {
     windowManager.waitUntilReadyToShow(
       const WindowOptions(
         size: Size(1280, 720),
-        minimumSize: Size(960, 640),
+        minimumSize: Size(1024, 680),
         center: true,
         skipTaskbar: false,
         title: 'فروش‌یار CRM',
@@ -80,11 +81,14 @@ class CrmApp extends StatelessWidget {
               ),
             );
           },
-          home: DesktopWindowController(
+          home: UpdateCoordinator(
             store: store,
-            child: store.hasSession
-                ? AppShell(store: store)
-                : LoginPage(store: store),
+            child: DesktopWindowController(
+              store: store,
+              child: store.hasSession
+                  ? AppShell(store: store)
+                  : LoginPage(store: store),
+            ),
           ),
         );
       },
@@ -168,6 +172,64 @@ class CrmApp extends StatelessWidget {
           : null,
     );
   }
+}
+
+class UpdateCoordinator extends StatefulWidget {
+  const UpdateCoordinator({
+    super.key,
+    required this.store,
+    required this.child,
+  });
+
+  final CrmStore store;
+  final Widget child;
+
+  @override
+  State<UpdateCoordinator> createState() => _UpdateCoordinatorState();
+}
+
+class _UpdateCoordinatorState extends State<UpdateCoordinator> {
+  final _updates = UpdateService();
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _checkAutomatically());
+  }
+
+  Future<void> _checkAutomatically() async {
+    if (!widget.store.automaticUpdates) return;
+    try {
+      final update = await _updates.checkForUpdate();
+      if (update == null || !mounted) return;
+      final install = await showDialog<bool>(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => AlertDialog(
+          title: const Text('به‌روزرسانی جدید آماده است'),
+          content: Text(
+            'نسخهٔ ${update.version} آماده دریافت و نصب است. برنامه پس از پایان نصب دوباره باز می‌شود.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('بعداً'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text('به‌روزرسانی اکنون'),
+            ),
+          ],
+        ),
+      );
+      if (install == true) await _updates.install(update);
+    } catch (_) {
+      // A failed background check must never prevent normal CRM work.
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.child;
 }
 
 class _NoAnimationPageTransitionsBuilder extends PageTransitionsBuilder {

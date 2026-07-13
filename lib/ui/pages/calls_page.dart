@@ -1,15 +1,32 @@
 import 'package:flutter/material.dart';
+import 'package:persian_datetime_picker/persian_datetime_picker.dart';
 
 import '../../core/crm_store.dart';
+import '../../core/models.dart';
 import '../widgets/common.dart';
 
-class CallsPage extends StatelessWidget {
+class CallsPage extends StatefulWidget {
   const CallsPage({super.key, required this.store});
 
   final CrmStore store;
 
-  Future<void> _openEditor(BuildContext context) async {
-    if (store.customers.isEmpty) {
+  @override
+  State<CallsPage> createState() => _CallsPageState();
+}
+
+class _CallsPageState extends State<CallsPage> {
+  final _search = TextEditingController();
+  int _sortColumn = 7;
+  bool _sortAscending = false;
+
+  @override
+  void dispose() {
+    _search.dispose();
+    super.dispose();
+  }
+
+  Future<void> _openEditor([CrmCall? call]) async {
+    if (widget.store.customers.isEmpty) {
       showCrmNotice(
         context,
         'ابتدا یک مشتری ثبت کنید.',
@@ -19,19 +36,68 @@ class CallsPage extends StatelessWidget {
     }
     final saved = await showDialog<bool>(
       context: context,
-      builder: (context) => _CallEditorDialog(store: store),
+      builder: (context) => _CallEditorDialog(store: widget.store, call: call),
     );
-    if (!context.mounted || saved != true) return;
+    if (!mounted || saved != true) return;
     showCrmNotice(
       context,
-      'تماس ثبت و برای همگام‌سازی صف شد.',
+      call == null ? 'تماس ثبت و برای همگام‌سازی صف شد.' : 'تماس ویرایش شد.',
       type: CrmNoticeType.success,
     );
   }
 
+  Future<void> _delete(CrmCall call) async {
+    if (!await confirmDelete(context, label: call.subject)) return;
+    await widget.store.deleteCall(call);
+    if (mounted) {
+      showCrmNotice(
+        context,
+        'تماس حذف و با سرور همگام‌سازی شد.',
+        type: CrmNoticeType.warning,
+      );
+    }
+  }
+
+  void _sort(int column) {
+    setState(() {
+      if (_sortColumn == column) {
+        _sortAscending = !_sortAscending;
+      } else {
+        _sortColumn = column;
+        _sortAscending = true;
+      }
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
-    final successful = store.successfulCalls;
+    final store = widget.store;
+    final needle = _search.text.trim().toLowerCase();
+    final rows = store.calls.where((call) {
+      return needle.isEmpty ||
+          call.customerName.toLowerCase().contains(needle) ||
+          call.subject.toLowerCase().contains(needle) ||
+          call.productName.toLowerCase().contains(needle) ||
+          call.status.contains(needle);
+    }).toList();
+    final values = <Comparable<Object?> Function(CrmCall)>[
+      (item) => item.customerName,
+      (item) => item.subject,
+      (item) => item.type,
+      (item) => item.status,
+      (item) => item.tradeType,
+      (item) => item.productName,
+      (item) => item.quantity,
+      (item) => item.callAt,
+      (item) => item.durationMinutes,
+      (item) => item.amount,
+    ];
+    rows.sort((left, right) {
+      final result = values[_sortColumn](
+        left,
+      ).compareTo(values[_sortColumn](right));
+      return _sortAscending ? result : -result;
+    });
     final failed = store.calls.where((call) => call.status == 'ناموفق').length;
     return ListView(
       children: [
@@ -40,7 +106,7 @@ class CallsPage extends StatelessWidget {
           subtitle: 'تماس‌ها، نتیجه، مبلغ احتمالی و پیگیری بعدی را ثبت کنید.',
           actions: [
             FilledButton.icon(
-              onPressed: () => _openEditor(context),
+              onPressed: _openEditor,
               icon: const Icon(Icons.add_call),
               label: const Text('ثبت تماس جدید'),
             ),
@@ -64,7 +130,7 @@ class CallsPage extends StatelessWidget {
               width: 240,
               child: KpiCard(
                 title: 'تماس موفق',
-                value: successful.toString(),
+                value: store.successfulCalls.toString(),
                 icon: Icons.phone_enabled_rounded,
                 color: const Color(0xff12966b),
               ),
@@ -91,88 +157,151 @@ class CallsPage extends StatelessWidget {
         ),
         const SizedBox(height: 18),
         SectionCard(
-          title: 'فهرست تماس‌ها',
-          trailing: Text(
-            'آخرین به‌روزرسانی محلی',
-            style: Theme.of(context).textTheme.labelSmall,
+          title: 'جست‌وجوی تماس‌ها',
+          child: AutoInputDirection(
+            controller: _search,
+            child: TextField(
+              controller: _search,
+              onChanged: (_) => setState(() {}),
+              decoration: const InputDecoration(
+                prefixIcon: Icon(Icons.search_rounded),
+                hintText: 'مشتری، موضوع، کالا یا نتیجه تماس',
+              ),
+            ),
           ),
+        ),
+        const SizedBox(height: 18),
+        SectionCard(
+          title: 'فهرست تماس‌ها',
+          trailing: Text('${formatPersianInteger(rows.length)} مورد'),
           padding: const EdgeInsets.all(12),
-          child: store.calls.isEmpty
+          child: rows.isEmpty
               ? const EmptyState(
                   icon: Icons.phone_outlined,
-                  title: 'تماسی ثبت نشده است',
-                  message: 'با ثبت اولین تماس، گزارش و پیگیری‌ها ساخته می‌شود.',
+                  title: 'تماسی پیدا نشد',
+                  message:
+                      'عبارت جست‌وجو را تغییر دهید یا تماس جدیدی ثبت کنید.',
                 )
-              : SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
+              : CrmTableScroll(
                   child: DataTable(
                     headingRowColor: WidgetStatePropertyAll(
                       Theme.of(context).colorScheme.surfaceContainerHighest,
                     ),
-                    columns: const [
-                      DataColumn(label: Text('مشتری')),
-                      DataColumn(label: Text('موضوع تماس')),
-                      DataColumn(label: Text('نوع')),
-                      DataColumn(label: Text('نتیجه')),
-                      DataColumn(label: Text('خرید / فروش')),
-                      DataColumn(label: Text('کالا')),
-                      DataColumn(label: Text('تعداد / تناژ')),
-                      DataColumn(label: Text('تاریخ')),
-                      DataColumn(label: Text('مدت')),
-                      DataColumn(label: Text('مبلغ احتمالی')),
+                    sortColumnIndex: _sortColumn,
+                    sortAscending: _sortAscending,
+                    columns: [
+                      DataColumn(
+                        label: const Text('مشتری'),
+                        onSort: (_, _) => _sort(0),
+                      ),
+                      DataColumn(
+                        label: const Text('موضوع تماس'),
+                        onSort: (_, _) => _sort(1),
+                      ),
+                      DataColumn(
+                        label: const Text('نوع'),
+                        onSort: (_, _) => _sort(2),
+                      ),
+                      DataColumn(
+                        label: const Text('نتیجه'),
+                        onSort: (_, _) => _sort(3),
+                      ),
+                      DataColumn(
+                        label: const Text('خرید / فروش'),
+                        onSort: (_, _) => _sort(4),
+                      ),
+                      DataColumn(
+                        label: const Text('کالا'),
+                        onSort: (_, _) => _sort(5),
+                      ),
+                      DataColumn(
+                        label: const Text('تعداد / تناژ'),
+                        numeric: true,
+                        onSort: (_, _) => _sort(6),
+                      ),
+                      DataColumn(
+                        label: const Text('تاریخ'),
+                        onSort: (_, _) => _sort(7),
+                      ),
+                      DataColumn(
+                        label: const Text('مدت'),
+                        numeric: true,
+                        onSort: (_, _) => _sort(8),
+                      ),
+                      DataColumn(
+                        label: const Text('مبلغ احتمالی (ریال)'),
+                        numeric: true,
+                        onSort: (_, _) => _sort(9),
+                      ),
+                      const DataColumn(label: Text('عملیات')),
                     ],
-                    rows: store.calls.map((call) {
-                      return DataRow(
-                        cells: [
-                          DataCell(
-                            SizedBox(
-                              width: 175,
-                              child: Text(
-                                call.customerName,
-                                overflow: TextOverflow.ellipsis,
+                    rows: rows
+                        .map(
+                          (call) => DataRow(
+                            cells: [
+                              DataCell(
+                                SizedBox(
+                                  width: 175,
+                                  child: Text(
+                                    call.customerName,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
                               ),
-                            ),
-                          ),
-                          DataCell(
-                            SizedBox(
-                              width: 180,
-                              child: Text(
-                                call.subject,
-                                overflow: TextOverflow.ellipsis,
+                              DataCell(
+                                SizedBox(
+                                  width: 180,
+                                  child: Text(
+                                    call.subject,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
                               ),
-                            ),
-                          ),
-                          DataCell(Text(call.type)),
-                          DataCell(StatusPill(label: call.status)),
-                          DataCell(
-                            Text(call.tradeType.isEmpty ? '—' : call.tradeType),
-                          ),
-                          DataCell(
-                            SizedBox(
-                              width: 130,
-                              child: Text(
-                                call.productName.isEmpty
-                                    ? '—'
-                                    : call.productName,
-                                overflow: TextOverflow.ellipsis,
+                              DataCell(Text(call.type)),
+                              DataCell(StatusPill(label: call.status)),
+                              DataCell(
+                                Text(
+                                  call.tradeType.isEmpty ? '—' : call.tradeType,
+                                ),
                               ),
-                            ),
+                              DataCell(
+                                SizedBox(
+                                  width: 130,
+                                  child: Text(
+                                    call.productName.isEmpty
+                                        ? '—'
+                                        : call.productName,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                              ),
+                              DataCell(
+                                Text(
+                                  call.quantity == 0
+                                      ? '—'
+                                      : formatPersianInteger(
+                                          call.quantity,
+                                          grouping: true,
+                                        ),
+                                ),
+                              ),
+                              DataCell(Text(compactDate(call.callAt))),
+                              DataCell(
+                                Text(
+                                  '${formatPersianInteger(call.durationMinutes)} دقیقه',
+                                ),
+                              ),
+                              DataCell(Text(compactMoney(call.amount))),
+                              DataCell(
+                                RecordActions(
+                                  onEdit: () => _openEditor(call),
+                                  onDelete: () => _delete(call),
+                                ),
+                              ),
+                            ],
                           ),
-                          DataCell(
-                            Text(
-                              call.quantity == 0
-                                  ? '—'
-                                  : call.quantity.toString(),
-                            ),
-                          ),
-                          DataCell(Text(compactDate(call.callAt))),
-                          DataCell(
-                            Text(call.durationMinutes.toString() + ' دقیقه'),
-                          ),
-                          DataCell(Text(compactMoney(call.amount))),
-                        ],
-                      );
-                    }).toList(),
+                        )
+                        .toList(),
                   ),
                 ),
         ),
@@ -182,9 +311,10 @@ class CallsPage extends StatelessWidget {
 }
 
 class _CallEditorDialog extends StatefulWidget {
-  const _CallEditorDialog({required this.store});
+  const _CallEditorDialog({required this.store, this.call});
 
   final CrmStore store;
+  final CrmCall? call;
 
   @override
   State<_CallEditorDialog> createState() => _CallEditorDialogState();
@@ -194,18 +324,40 @@ class _CallEditorDialogState extends State<_CallEditorDialog> {
   final _formKey = GlobalKey<FormState>();
   final _subject = TextEditingController();
   final _notes = TextEditingController();
-  final _duration = TextEditingController(text: '5');
-  final _amount = TextEditingController(text: '0');
+  final _duration = TextEditingController(text: '۵');
+  final _amount = TextEditingController(text: '۰');
   final _product = TextEditingController();
-  final _quantity = TextEditingController(text: '0');
-  final _unitPrice = TextEditingController(text: '0');
+  final _quantity = TextEditingController(text: '۰');
+  final _unitPrice = TextEditingController(text: '۰');
   String? _customerId;
   String _type = 'تلفنی';
   String _direction = 'خروجی';
   String _status = 'موفق';
   String _tradeType = 'فروش';
   bool _addFollowUp = true;
+  DateTime? _nextFollowUp = DateTime.now().add(const Duration(days: 1));
   bool _saving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    final call = widget.call;
+    if (call == null) return;
+    _customerId = call.customerId;
+    _subject.text = call.subject;
+    _notes.text = call.notes;
+    _duration.text = formatPersianInteger(call.durationMinutes, grouping: true);
+    _amount.text = formatPersianInteger(call.amount, grouping: true);
+    _product.text = call.productName;
+    _quantity.text = formatPersianInteger(call.quantity, grouping: true);
+    _unitPrice.text = formatPersianInteger(call.unitPrice, grouping: true);
+    _type = call.type;
+    _direction = call.direction;
+    _status = call.status;
+    _tradeType = call.tradeType.isEmpty ? 'بدون معامله' : call.tradeType;
+    _nextFollowUp = call.nextFollowUp;
+    _addFollowUp = call.nextFollowUp != null;
+  }
 
   @override
   void dispose() {
@@ -219,14 +371,28 @@ class _CallEditorDialogState extends State<_CallEditorDialog> {
     super.dispose();
   }
 
+  Future<void> _pickFollowUpDate() async {
+    final date = await showPersianDatePicker(
+      context: context,
+      initialDate: Jalali.fromDateTime(_nextFollowUp ?? DateTime.now()),
+      firstDate: Jalali.fromDateTime(
+        DateTime.now().subtract(const Duration(days: 1)),
+      ),
+      lastDate: Jalali.fromDateTime(
+        DateTime.now().add(const Duration(days: 730)),
+      ),
+    );
+    if (date != null && mounted) {
+      setState(() => _nextFollowUp = date.toDateTime());
+    }
+  }
+
   Future<void> _save() async {
     if (!_formKey.currentState!.validate()) return;
     final customer = widget.store.customers.firstWhere(
       (item) => item.id == _customerId,
     );
-    setState(() {
-      _saving = true;
-    });
+    setState(() => _saving = true);
     await widget.store.saveCall(
       customer: customer,
       subject: _subject.text,
@@ -240,58 +406,56 @@ class _CallEditorDialogState extends State<_CallEditorDialog> {
       productName: _product.text,
       quantity: parsePersianInt(_quantity.text),
       unitPrice: parsePersianInt(_unitPrice.text),
-      nextFollowUp: _addFollowUp
-          ? DateTime.now().add(const Duration(days: 1))
-          : null,
+      nextFollowUp: _addFollowUp ? _nextFollowUp : null,
+      id: widget.call?.id,
+      callAt: widget.call?.callAt,
     );
-    if (!mounted) return;
-    Navigator.of(context).pop(true);
+    if (mounted) Navigator.of(context).pop(true);
   }
 
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: const Text('ثبت و پیگیری تماس'),
-      content: SizedBox(
-        width: 560,
+      title: Text(widget.call == null ? 'ثبت و پیگیری تماس' : 'ویرایش تماس'),
+      content: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 560),
         child: Form(
           key: _formKey,
           child: SingleChildScrollView(
-            child: Wrap(
-              spacing: 12,
-              runSpacing: 12,
+            child: ResponsiveFormGrid(
               children: [
-                SizedBox(
-                  width: double.infinity,
+                ResponsiveFormField.full(
                   child: DropdownButtonFormField<String>(
+                    initialValue: _customerId,
+                    isExpanded: true,
                     decoration: const InputDecoration(
                       labelText: 'مشتری *',
                       prefixIcon: Icon(Icons.person_outline_rounded),
                     ),
-                    items: widget.store.customers.map((customer) {
-                      final label = customer.company.isEmpty
-                          ? customer.name
-                          : customer.company;
-                      return DropdownMenuItem(
-                        value: customer.id,
-                        child: Text(label),
-                      );
-                    }).toList(),
+                    items: widget.store.customers
+                        .map(
+                          (customer) => DropdownMenuItem(
+                            value: customer.id,
+                            child: Text(
+                              customer.company.isEmpty
+                                  ? customer.name
+                                  : customer.company,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        )
+                        .toList(),
                     validator: (value) =>
                         value == null ? 'یک مشتری را انتخاب کنید.' : null,
-                    onChanged: (value) {
-                      setState(() {
-                        _customerId = value;
-                      });
-                    },
+                    onChanged: (value) => setState(() => _customerId = value),
                   ),
                 ),
-                SizedBox(
-                  width: double.infinity,
+                ResponsiveFormField.full(
                   child: AutoInputDirection(
                     controller: _subject,
                     child: TextFormField(
                       controller: _subject,
+                      inputFormatters: [textOnlyFormatter],
                       decoration: const InputDecoration(
                         labelText: 'موضوع تماس *',
                         prefixIcon: Icon(Icons.subject_rounded),
@@ -303,122 +467,64 @@ class _CallEditorDialogState extends State<_CallEditorDialog> {
                     ),
                   ),
                 ),
-                _half(
-                  DropdownButtonFormField<String>(
-                    initialValue: _type,
-                    decoration: const InputDecoration(labelText: 'نوع تماس'),
-                    items: const [
-                      DropdownMenuItem(value: 'تلفنی', child: Text('تلفنی')),
-                      DropdownMenuItem(value: 'جلسه', child: Text('جلسه')),
-                      DropdownMenuItem(
-                        value: 'استعلام',
-                        child: Text('استعلام'),
-                      ),
-                      DropdownMenuItem(value: 'پیام', child: Text('پیام')),
-                      DropdownMenuItem(value: 'ایمیل', child: Text('ایمیل')),
-                    ],
-                    onChanged: (value) {
-                      setState(() {
-                        _type = value ?? _type;
-                      });
-                    },
+                ResponsiveFormField(
+                  child: _dropdown('نوع تماس', _type, const [
+                    'تلفنی',
+                    'جلسه',
+                    'استعلام',
+                    'پیام',
+                    'ایمیل',
+                  ], (value) => _type = value),
+                ),
+                ResponsiveFormField(
+                  child: _dropdown('جهت تماس', _direction, const [
+                    'خروجی',
+                    'ورودی',
+                  ], (value) => _direction = value),
+                ),
+                ResponsiveFormField(
+                  child: _dropdown('نتیجه تماس', _status, const [
+                    'موفق',
+                    'پیگیری',
+                    'ناموفق',
+                  ], (value) => _status = value),
+                ),
+                ResponsiveFormField(
+                  child: _numberField(_duration, 'مدت (دقیقه)'),
+                ),
+                ResponsiveFormField(
+                  child: _numberField(
+                    _amount,
+                    'مبلغ احتمالی (ریال)',
+                    required: true,
                   ),
                 ),
-                _half(
-                  DropdownButtonFormField<String>(
-                    initialValue: _direction,
-                    decoration: const InputDecoration(labelText: 'جهت تماس'),
-                    items: const [
-                      DropdownMenuItem(value: 'خروجی', child: Text('خروجی')),
-                      DropdownMenuItem(value: 'ورودی', child: Text('ورودی')),
-                    ],
-                    onChanged: (value) {
-                      setState(() {
-                        _direction = value ?? _direction;
-                      });
-                    },
-                  ),
+                ResponsiveFormField(
+                  child: _dropdown('نوع معامله', _tradeType, const [
+                    'فروش',
+                    'خرید',
+                    'بدون معامله',
+                  ], (value) => _tradeType = value),
                 ),
-                _half(
-                  DropdownButtonFormField<String>(
-                    initialValue: _status,
-                    decoration: const InputDecoration(labelText: 'نتیجه تماس'),
-                    items: const [
-                      DropdownMenuItem(value: 'موفق', child: Text('موفق')),
-                      DropdownMenuItem(value: 'پیگیری', child: Text('پیگیری')),
-                      DropdownMenuItem(value: 'ناموفق', child: Text('ناموفق')),
-                    ],
-                    onChanged: (value) {
-                      setState(() {
-                        _status = value ?? _status;
-                      });
-                    },
-                  ),
-                ),
-                _input(
-                  _duration,
-                  TextFormField(
-                    controller: _duration,
-                    keyboardType: TextInputType.number,
-                    decoration: const InputDecoration(labelText: 'مدت (دقیقه)'),
-                  ),
-                ),
-                _input(
-                  _amount,
-                  TextFormField(
-                    controller: _amount,
-                    keyboardType: TextInputType.number,
-                    decoration: const InputDecoration(
-                      labelText: 'مبلغ احتمالی (تومان)',
-                    ),
-                  ),
-                ),
-                _half(
-                  DropdownButtonFormField<String>(
-                    initialValue: _tradeType,
-                    decoration: const InputDecoration(labelText: 'نوع معامله'),
-                    items: const [
-                      DropdownMenuItem(value: 'فروش', child: Text('فروش')),
-                      DropdownMenuItem(value: 'خرید', child: Text('خرید')),
-                      DropdownMenuItem(
-                        value: 'بدون معامله',
-                        child: Text('بدون معامله'),
-                      ),
-                    ],
-                    onChanged: (value) {
-                      setState(() {
-                        _tradeType = value ?? _tradeType;
-                      });
-                    },
-                  ),
-                ),
-                _input(
-                  _product,
-                  TextFormField(
+                ResponsiveFormField(
+                  child: AutoInputDirection(
                     controller: _product,
-                    decoration: const InputDecoration(labelText: 'کالا / خدمت'),
-                  ),
-                ),
-                _input(
-                  _quantity,
-                  TextFormField(
-                    controller: _quantity,
-                    keyboardType: TextInputType.number,
-                    decoration: const InputDecoration(
-                      labelText: 'تعداد یا تناژ',
+                    child: TextFormField(
+                      controller: _product,
+                      inputFormatters: [textOnlyFormatter],
+                      decoration: const InputDecoration(
+                        labelText: 'کالا / خدمت',
+                      ),
                     ),
                   ),
                 ),
-                _input(
-                  _unitPrice,
-                  TextFormField(
-                    controller: _unitPrice,
-                    keyboardType: TextInputType.number,
-                    decoration: const InputDecoration(labelText: 'فی (تومان)'),
-                  ),
+                ResponsiveFormField(
+                  child: _numberField(_quantity, 'تعداد یا تناژ'),
                 ),
-                SizedBox(
-                  width: double.infinity,
+                ResponsiveFormField(
+                  child: _numberField(_unitPrice, 'فی (ریال)'),
+                ),
+                ResponsiveFormField.full(
                   child: AutoInputDirection(
                     controller: _notes,
                     child: TextFormField(
@@ -432,22 +538,36 @@ class _CallEditorDialogState extends State<_CallEditorDialog> {
                     ),
                   ),
                 ),
-                SizedBox(
-                  width: double.infinity,
+                ResponsiveFormField.full(
                   child: SwitchListTile(
                     contentPadding: EdgeInsets.zero,
                     value: _addFollowUp,
-                    title: const Text('ایجاد پیگیری برای فردا'),
-                    subtitle: const Text(
-                      'در نسخه بعد امکان تعیین تاریخ شمسی نیز فعال می‌شود.',
+                    title: const Text('ایجاد پیگیری'),
+                    subtitle: Text(
+                      _nextFollowUp == null
+                          ? 'بدون تاریخ'
+                          : 'تاریخ پیگیری: ${compactDate(_nextFollowUp!)}',
                     ),
-                    onChanged: (value) {
-                      setState(() {
-                        _addFollowUp = value;
-                      });
-                    },
+                    onChanged: (value) => setState(() {
+                      _addFollowUp = value;
+                      _nextFollowUp ??= DateTime.now().add(
+                        const Duration(days: 1),
+                      );
+                    }),
                   ),
                 ),
+                if (_addFollowUp)
+                  ResponsiveFormField.full(
+                    child: OutlinedButton.icon(
+                      onPressed: _pickFollowUpDate,
+                      icon: const Icon(Icons.event_outlined),
+                      label: Text(
+                        _nextFollowUp == null
+                            ? 'انتخاب تاریخ پیگیری'
+                            : 'تاریخ پیگیری: ${compactDate(_nextFollowUp!)}',
+                      ),
+                    ),
+                  ),
               ],
             ),
           ),
@@ -467,17 +587,47 @@ class _CallEditorDialogState extends State<_CallEditorDialog> {
                   child: CircularProgressIndicator(strokeWidth: 2),
                 )
               : const Icon(Icons.save_outlined),
-          label: const Text('ثبت تماس'),
+          label: Text(widget.call == null ? 'ثبت تماس' : 'ذخیره تغییرات'),
         ),
       ],
     );
   }
 
-  Widget _half(Widget child) {
-    return SizedBox(width: 270, child: child);
+  Widget _dropdown(
+    String label,
+    String selected,
+    List<String> values,
+    ValueChanged<String> onChanged,
+  ) {
+    return DropdownButtonFormField<String>(
+      initialValue: selected,
+      isExpanded: true,
+      decoration: InputDecoration(labelText: label),
+      items: values
+          .map((item) => DropdownMenuItem(value: item, child: Text(item)))
+          .toList(),
+      onChanged: (value) => setState(() => onChanged(value ?? selected)),
+    );
   }
 
-  Widget _input(TextEditingController controller, Widget child) {
-    return _half(AutoInputDirection(controller: controller, child: child));
+  Widget _numberField(
+    TextEditingController controller,
+    String label, {
+    bool required = false,
+  }) {
+    return AutoInputDirection(
+      controller: controller,
+      child: TextFormField(
+        controller: controller,
+        keyboardType: TextInputType.number,
+        inputFormatters: const [persianNumberFormatter],
+        decoration: InputDecoration(labelText: label),
+        validator: required
+            ? (value) => value == null || value.trim().isEmpty
+                  ? 'مبلغ را وارد کنید.'
+                  : null
+            : null,
+      ),
+    );
   }
 }
