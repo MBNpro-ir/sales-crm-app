@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/crm_store.dart';
 import '../../core/models.dart';
+import '../../core/report_service.dart';
 import '../widgets/common.dart';
 
 class ProductsPage extends StatefulWidget {
@@ -61,6 +62,61 @@ class _ProductsPageState extends State<ProductsPage> {
     });
   }
 
+  Future<void> _addCategory() async {
+    final controller = TextEditingController();
+    final value = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('ایجاد گروه کالای جدید'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          decoration: const InputDecoration(labelText: 'نام گروه کالا'),
+          onSubmitted: (value) => Navigator.of(context).pop(value),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('انصراف'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(controller.text),
+            child: const Text('افزودن'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (value == null || value.trim().isEmpty) return;
+    await widget.store.addProductCategory(value);
+  }
+
+  Future<void> _printReport() => CrmReportService.printTable(
+    title: 'گزارش کالا و موجودی بر اساس گروه',
+    headers: const [
+      'گروه',
+      'کد',
+      'نام محصول',
+      'واحد',
+      'قیمت پایه',
+      'موجودی',
+      'وضعیت',
+    ],
+    rows: widget.store.products
+        .map(
+          (item) => <Object?>[
+            item.category,
+            item.sku,
+            item.name,
+            item.unit,
+            formatPersianInteger(item.unitPrice),
+            formatPersianInteger(item.stock),
+            item.isActive ? 'فعال' : 'غیرفعال',
+          ],
+        )
+        .toList(),
+  );
+
   @override
   Widget build(BuildContext context) {
     final needle = _search.text.trim().toLowerCase();
@@ -98,6 +154,16 @@ class _ProductsPageState extends State<ProductsPage> {
           subtitle:
               'کالاها، قیمت پایه و حداقل موجودی را برای فروش و خرید نگه دارید.',
           actions: [
+            OutlinedButton.icon(
+              onPressed: _addCategory,
+              icon: const Icon(Icons.create_new_folder_outlined),
+              label: const Text('گروه کالای جدید'),
+            ),
+            OutlinedButton.icon(
+              onPressed: _printReport,
+              icon: const Icon(Icons.print_outlined),
+              label: const Text('گزارش گروه‌ها'),
+            ),
             FilledButton.icon(
               onPressed: _openEditor,
               icon: const Icon(Icons.add_box_outlined),
@@ -141,6 +207,22 @@ class _ProductsPageState extends State<ProductsPage> {
               ),
             ),
           ],
+        ),
+        const SizedBox(height: 18),
+        SectionCard(
+          title: 'گروه‌بندی کالاها',
+          child: Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: widget.store.productCategories.map((category) {
+              final count = widget.store.products
+                  .where((item) => item.category == category)
+                  .length;
+              return Chip(
+                label: Text('$category: ${formatPersianInteger(count)} محصول'),
+              );
+            }).toList(),
+          ),
         ),
         const SizedBox(height: 18),
         if (lowStock.isNotEmpty) ...[
@@ -298,7 +380,7 @@ class _ProductEditorState extends State<_ProductEditor> {
   final _form = GlobalKey<FormState>();
   final _name = TextEditingController();
   final _sku = TextEditingController();
-  final _category = TextEditingController(text: 'عمومی');
+  String _category = 'سایر';
   final _unit = TextEditingController(text: 'عدد');
   final _price = TextEditingController(text: '۰');
   final _stock = TextEditingController(text: '۰');
@@ -314,7 +396,7 @@ class _ProductEditorState extends State<_ProductEditor> {
     if (product == null) return;
     _name.text = product.name;
     _sku.text = product.sku;
-    _category.text = product.category;
+    _category = product.category.isEmpty ? 'سایر' : product.category;
     _unit.text = product.unit;
     _price.text = formatPersianInteger(product.unitPrice, grouping: true);
     _stock.text = formatPersianInteger(product.stock);
@@ -327,7 +409,6 @@ class _ProductEditorState extends State<_ProductEditor> {
   void dispose() {
     _name.dispose();
     _sku.dispose();
-    _category.dispose();
     _unit.dispose();
     _price.dispose();
     _stock.dispose();
@@ -343,7 +424,7 @@ class _ProductEditorState extends State<_ProductEditor> {
       id: widget.product?.id,
       name: _name.text,
       sku: _sku.text,
-      category: _category.text,
+      category: _category,
       unit: _unit.text,
       unitPrice: parsePersianInt(_price.text),
       stock: parsePersianInt(_stock.text),
@@ -371,7 +452,28 @@ class _ProductEditorState extends State<_ProductEditor> {
                   child: _textField(_name, 'نام محصول *', required: true),
                 ),
                 ResponsiveFormField(child: _plainTextField(_sku, 'کد محصول')),
-                ResponsiveFormField(child: _textField(_category, 'دسته‌بندی')),
+                ResponsiveFormField(
+                  child: DropdownButtonFormField<String>(
+                    initialValue: _category,
+                    isExpanded: true,
+                    decoration: InputDecoration(
+                      labelText: 'گروه کالا',
+                      suffixIcon: IconButton(
+                        tooltip: 'افزودن گروه',
+                        onPressed: _addCategory,
+                        icon: const Icon(Icons.add_circle_outline),
+                      ),
+                    ),
+                    items: {...widget.store.productCategories, _category}
+                        .map(
+                          (item) =>
+                              DropdownMenuItem(value: item, child: Text(item)),
+                        )
+                        .toList(),
+                    onChanged: (value) =>
+                        setState(() => _category = value ?? _category),
+                  ),
+                ),
                 ResponsiveFormField(child: _textField(_unit, 'واحد')),
                 ResponsiveFormField(
                   child: _numberField(
@@ -444,6 +546,31 @@ class _ProductEditorState extends State<_ProductEditor> {
             : null,
       ),
     );
+  }
+
+  Future<void> _addCategory() async {
+    final controller = TextEditingController();
+    final value = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('گروه کالای جدید'),
+        content: TextField(controller: controller, autofocus: true),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('انصراف'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(controller.text),
+            child: const Text('افزودن'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (value == null || value.trim().isEmpty) return;
+    await widget.store.addProductCategory(value);
+    setState(() => _category = value.trim());
   }
 
   Widget _plainTextField(TextEditingController controller, String label) {

@@ -39,6 +39,28 @@ class CrmStore extends ChangeNotifier {
   List<CrmTask> _tasks = const [];
   List<CrmQuote> _quotes = const [];
   List<CrmOrder> _orders = const [];
+  List<String> _activityTypes = const [
+    'تولیدکننده',
+    'مصرف‌کننده',
+    'بازرگان',
+    'واسطه',
+    'ضایعات',
+    'بازیافت',
+    'خریدار',
+    'فروشنده',
+    'آخال',
+    'صادرکننده',
+    'واردکننده',
+    'سایر',
+  ];
+  List<String> _customerStatuses = const ['فعال', 'مشتری بالقوه', 'غیرفعال'];
+  List<String> _productCategories = const [
+    'صنایع شیمیایی',
+    'ضایعات',
+    'مواد غذایی',
+    'خدمات',
+    'سایر',
+  ];
   bool _busy = false;
   bool _syncing = false;
   bool _online = false;
@@ -69,6 +91,9 @@ class CrmStore extends ChangeNotifier {
   List<CrmTask> get tasks => List.unmodifiable(_tasks);
   List<CrmQuote> get quotes => List.unmodifiable(_quotes);
   List<CrmOrder> get orders => List.unmodifiable(_orders);
+  List<String> get activityTypes => List.unmodifiable(_activityTypes);
+  List<String> get customerStatuses => List.unmodifiable(_customerStatuses);
+  List<String> get productCategories => List.unmodifiable(_productCategories);
   bool get busy => _busy;
   bool get syncing => _syncing;
   bool get online => _online;
@@ -109,8 +134,16 @@ class CrmStore extends ChangeNotifier {
   );
   int get overdueTasks => _tasks.where((task) => task.isOverdue).length;
   int get openTasks => _tasks.where((task) => !task.isDone).length;
-  int get pendingQuotes =>
-      _quotes.where((quote) => quote.status != 'تایید شده').length;
+  int get pendingQuotes => _quotes
+      .where(
+        (quote) => !{
+          'تایید شده',
+          'تأیید شده',
+          'رد شده',
+          'فاکتور صادر شد',
+        }.contains(quote.status),
+      )
+      .length;
   int get salesOrders =>
       _orders.where((order) => order.direction == 'فروش').length;
   int get purchaseOrders =>
@@ -148,6 +181,18 @@ class CrmStore extends ChangeNotifier {
     _userName = _preferences!.getString('user_name') ?? _userName;
     _organizationName =
         _preferences!.getString('organization_name') ?? _organizationName;
+    _activityTypes = _mergeOptions(
+      _activityTypes,
+      _preferences!.getStringList('activity_types') ?? const [],
+    );
+    _customerStatuses = _mergeOptions(
+      _customerStatuses,
+      _preferences!.getStringList('customer_statuses') ?? const [],
+    );
+    _productCategories = _mergeOptions(
+      _productCategories,
+      _preferences!.getStringList('product_categories') ?? const [],
+    );
     await _database.initialize();
     await _database.removeLegacyDemoData();
     if (hasSession && _organizationId == null) {
@@ -247,6 +292,37 @@ class CrmStore extends ChangeNotifier {
     notifyListeners();
   }
 
+  List<String> _mergeOptions(List<String> defaults, List<String> saved) {
+    return {
+      ...defaults,
+      ...saved.map((item) => item.trim()),
+    }.where((item) => item.isNotEmpty).toList();
+  }
+
+  Future<void> addActivityType(String value) async {
+    final item = value.trim();
+    if (item.isEmpty || _activityTypes.contains(item)) return;
+    _activityTypes = [..._activityTypes, item];
+    await _preferences?.setStringList('activity_types', _activityTypes);
+    notifyListeners();
+  }
+
+  Future<void> addCustomerStatus(String value) async {
+    final item = value.trim();
+    if (item.isEmpty || _customerStatuses.contains(item)) return;
+    _customerStatuses = [..._customerStatuses, item];
+    await _preferences?.setStringList('customer_statuses', _customerStatuses);
+    notifyListeners();
+  }
+
+  Future<void> addProductCategory(String value) async {
+    final item = value.trim();
+    if (item.isEmpty || _productCategories.contains(item)) return;
+    _productCategories = [..._productCategories, item];
+    await _preferences?.setStringList('product_categories', _productCategories);
+    notifyListeners();
+  }
+
   Future<String?> login(String identifier, String password) async {
     _busy = true;
     notifyListeners();
@@ -319,7 +395,8 @@ class CrmStore extends ChangeNotifier {
       if (error.isUnauthorized) {
         await _endSession(
           clearWorkspace: true,
-          notice: 'دسترسی این حساب تغییر کرده یا غیرفعال شده است؛ دوباره وارد شوید.',
+          notice:
+              'دسترسی این حساب تغییر کرده یا غیرفعال شده است؛ دوباره وارد شوید.',
         );
       }
     } catch (_) {
@@ -364,6 +441,83 @@ class CrmStore extends ChangeNotifier {
     );
     await _database.saveCustomer(customer);
     await _afterLocalMutation();
+  }
+
+  String nextCustomerCode() {
+    var maximum = 0;
+    for (final customer in _customers) {
+      final digits = customer.customerCode.replaceAll(RegExp(r'[^0-9]'), '');
+      final value = int.tryParse(digits) ?? 0;
+      if (value > maximum) maximum = value;
+    }
+    return 'M-${(maximum + 1).toString().padLeft(6, '0')}';
+  }
+
+  Future<int> importCustomerRows(List<Map<String, String>> rows) async {
+    var imported = 0;
+    var nextSequence = _customers.fold<int>(0, (maximum, customer) {
+      final digits = customer.customerCode.replaceAll(RegExp(r'[^0-9]'), '');
+      final value = int.tryParse(digits) ?? 0;
+      return value > maximum ? value : maximum;
+    });
+    for (final row in rows) {
+      final name = (row['name'] ?? '').trim();
+      final company = (row['company'] ?? '').trim();
+      final mobile = (row['mobile'] ?? '').trim();
+      if (name.isEmpty && company.isEmpty && mobile.isEmpty) continue;
+      final current = _customers.cast<CrmCustomer?>().firstWhere(
+        (item) =>
+            item != null &&
+            ((mobile.isNotEmpty && item.mobile == mobile) ||
+                ((row['customer_code'] ?? '').isNotEmpty &&
+                    item.customerCode == row['customer_code'])),
+        orElse: () => null,
+      );
+      final details = <String, String>{
+        ...?current?.details,
+        'customer_code': (row['customer_code'] ?? '').trim().isEmpty
+            ? 'M-${(++nextSequence).toString().padLeft(6, '0')}'
+            : (row['customer_code'] ?? '').trim(),
+        'is_vip':
+            (row['is_vip'] ?? '').trim() == 'بله' ||
+                (row['is_vip'] ?? '').trim().toLowerCase() == 'true'
+            ? 'true'
+            : 'false',
+        'email': (row['email'] ?? '').trim(),
+        'address': (row['address'] ?? '').trim(),
+      };
+      await _database.saveCustomer(
+        CrmCustomer(
+          id: current?.id ?? _uuid.v4(),
+          name: name.isEmpty ? company : name,
+          company: company,
+          mobile: mobile,
+          phone: (row['phone'] ?? '').trim(),
+          province: (row['province'] ?? '').trim(),
+          city: (row['city'] ?? '').trim(),
+          activityType: (row['activity_type'] ?? '').trim().isEmpty
+              ? 'سایر'
+              : (row['activity_type'] ?? '').trim(),
+          status: (row['status'] ?? '').trim().isEmpty
+              ? 'فعال'
+              : (row['status'] ?? '').trim(),
+          priority: (row['priority'] ?? '').trim().isEmpty
+              ? 'متوسط'
+              : (row['priority'] ?? '').trim(),
+          notes: (row['notes'] ?? '').trim(),
+          tags: (row['tags'] ?? '')
+              .split(',')
+              .map((item) => item.trim())
+              .where((item) => item.isNotEmpty)
+              .toList(),
+          details: details,
+          updatedAt: DateTime.now(),
+        ),
+      );
+      imported++;
+    }
+    if (imported > 0) await _afterLocalMutation();
+    return imported;
   }
 
   Future<void> saveCall({
@@ -443,6 +597,7 @@ class CrmStore extends ChangeNotifier {
     required int amount,
     required int probability,
     required String notes,
+    String tradeType = 'فروش',
     DateTime? expectedClose,
     String? id,
   }) async {
@@ -456,6 +611,7 @@ class CrmStore extends ChangeNotifier {
       probability: probability,
       notes: notes.trim(),
       ownerName: _userName,
+      tradeType: tradeType,
       expectedClose: expectedClose,
       updatedAt: DateTime.now(),
     );
@@ -490,7 +646,7 @@ class CrmStore extends ChangeNotifier {
     await _afterLocalMutation();
   }
 
-  Future<void> completeTask(CrmTask task) async {
+  Future<void> toggleTask(CrmTask task) async {
     final completed = CrmTask(
       id: task.id,
       customerId: task.customerId,
@@ -498,7 +654,7 @@ class CrmStore extends ChangeNotifier {
       title: task.title,
       taskType: task.taskType,
       priority: task.priority,
-      status: 'انجام شد',
+      status: task.isDone ? 'باز' : 'انجام شد',
       notes: task.notes,
       dueAt: task.dueAt,
       ownerName: task.ownerName,
@@ -513,6 +669,8 @@ class CrmStore extends ChangeNotifier {
     required String status,
     required int totalAmount,
     required String notes,
+    String direction = 'فروش',
+    List<CrmDocumentLine> lineItems = const [],
     DateTime? validUntil,
     String? id,
     String? quoteNumber,
@@ -527,6 +685,8 @@ class CrmStore extends ChangeNotifier {
       totalAmount: totalAmount,
       notes: notes.trim(),
       validUntil: validUntil,
+      direction: direction,
+      lineItems: lineItems,
       updatedAt: now,
     );
     await _database.saveQuote(quote);
@@ -539,6 +699,9 @@ class CrmStore extends ChangeNotifier {
     required String status,
     required int totalAmount,
     required String notes,
+    List<CrmDocumentLine> lineItems = const [],
+    String sourceType = '',
+    String sourceId = '',
     String? id,
     String? orderNumber,
     DateTime? orderAt,
@@ -554,6 +717,9 @@ class CrmStore extends ChangeNotifier {
       totalAmount: totalAmount,
       notes: notes.trim(),
       orderAt: orderAt ?? now,
+      lineItems: lineItems,
+      sourceType: sourceType,
+      sourceId: sourceId,
       updatedAt: now,
     );
     await _database.saveOrder(order);
@@ -625,6 +791,7 @@ class CrmStore extends ChangeNotifier {
         probability: item.probability,
         notes: item.notes,
         ownerName: item.ownerName,
+        tradeType: item.tradeType,
         expectedClose: item.expectedClose,
         updatedAt: DateTime.now(),
         deleted: true,
@@ -664,6 +831,8 @@ class CrmStore extends ChangeNotifier {
         totalAmount: item.totalAmount,
         notes: item.notes,
         validUntil: item.validUntil,
+        direction: item.direction,
+        lineItems: item.lineItems,
         updatedAt: DateTime.now(),
         deleted: true,
       ),
@@ -683,6 +852,9 @@ class CrmStore extends ChangeNotifier {
         totalAmount: item.totalAmount,
         notes: item.notes,
         orderAt: item.orderAt,
+        lineItems: item.lineItems,
+        sourceType: item.sourceType,
+        sourceId: item.sourceId,
         updatedAt: DateTime.now(),
         deleted: true,
       ),
@@ -710,7 +882,8 @@ class CrmStore extends ChangeNotifier {
     _checkingSession = true;
     try {
       final session = await _api.currentSession();
-      if (_organizationId != null && _organizationId != session.organizationId) {
+      if (_organizationId != null &&
+          _organizationId != session.organizationId) {
         await _endSession(
           clearWorkspace: true,
           notice: 'فضای کاری این حساب تغییر کرده است؛ دوباره وارد شوید.',
@@ -722,12 +895,16 @@ class CrmStore extends ChangeNotifier {
       _organizationName = session.organizationName;
       await _preferences?.setString('organization_id', session.organizationId);
       await _preferences?.setString('user_name', session.userName);
-      await _preferences?.setString('organization_name', session.organizationName);
+      await _preferences?.setString(
+        'organization_name',
+        session.organizationName,
+      );
     } on ApiException catch (error) {
       if (error.isUnauthorized) {
         await _endSession(
           clearWorkspace: true,
-          notice: 'دسترسی این حساب تغییر کرده یا غیرفعال شده است؛ دوباره وارد شوید.',
+          notice:
+              'دسترسی این حساب تغییر کرده یا غیرفعال شده است؛ دوباره وارد شوید.',
         );
       }
     } finally {

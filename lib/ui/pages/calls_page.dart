@@ -2,12 +2,14 @@ import 'package:flutter/material.dart';
 
 import '../../core/crm_store.dart';
 import '../../core/models.dart';
+import '../../core/report_service.dart';
 import '../widgets/common.dart';
 
 class CallsPage extends StatefulWidget {
-  const CallsPage({super.key, required this.store});
+  const CallsPage({super.key, required this.store, this.initialStatus});
 
   final CrmStore store;
+  final String? initialStatus;
 
   @override
   State<CallsPage> createState() => _CallsPageState();
@@ -17,6 +19,19 @@ class _CallsPageState extends State<CallsPage> {
   final _search = TextEditingController();
   int _sortColumn = 7;
   bool _sortAscending = false;
+  String? _resultFilter;
+  String? _typeFilter;
+  String? _tradeFilter;
+  String? _activityFilter;
+  String? _priorityFilter;
+  String _groupBy = 'نتیجه تماس';
+  bool _vipOnly = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _resultFilter = widget.initialStatus;
+  }
 
   @override
   void dispose() {
@@ -24,7 +39,7 @@ class _CallsPageState extends State<CallsPage> {
     super.dispose();
   }
 
-  Future<void> _openEditor([CrmCall? call]) async {
+  Future<void> _openEditor([CrmCall? call, String? customerId]) async {
     if (widget.store.customers.isEmpty) {
       showCrmNotice(
         context,
@@ -35,7 +50,11 @@ class _CallsPageState extends State<CallsPage> {
     }
     final saved = await showDialog<bool>(
       context: context,
-      builder: (context) => _CallEditorDialog(store: widget.store, call: call),
+      builder: (context) => _CallEditorDialog(
+        store: widget.store,
+        call: call,
+        initialCustomerId: customerId,
+      ),
     );
     if (!mounted || saved != true) return;
     showCrmNotice(
@@ -68,17 +87,82 @@ class _CallsPageState extends State<CallsPage> {
     });
   }
 
+  CrmCustomer? _customerFor(CrmCall call) => widget.store.customers
+      .cast<CrmCustomer?>()
+      .firstWhere((item) => item?.id == call.customerId, orElse: () => null);
+
+  List<CrmCustomer> _staleCustomers() {
+    final threshold = DateTime.now().subtract(const Duration(days: 15));
+    return widget.store.customers.where((customer) {
+      final calls = widget.store.calls
+          .where((call) => call.customerId == customer.id)
+          .toList();
+      if (calls.isEmpty) return true;
+      calls.sort((a, b) => b.callAt.compareTo(a.callAt));
+      return calls.first.callAt.isBefore(threshold);
+    }).toList();
+  }
+
+  Future<void> _printCalls({bool todayOnly = false}) {
+    final today = DateTime.now();
+    final calls = _filteredCalls().where(
+      (item) =>
+          !todayOnly ||
+          (item.callAt.year == today.year &&
+              item.callAt.month == today.month &&
+              item.callAt.day == today.day),
+    );
+    return CrmReportService.printTable(
+      title: todayOnly ? 'گزارش روزانه مدیر' : 'گزارش تماس‌ها و جلسات',
+      subtitle: todayOnly ? 'تاریخ: ${compactDate(today)}' : '',
+      headers: const [
+        'مشتری',
+        'موضوع',
+        'نوع',
+        'نتیجه',
+        'خرید/فروش',
+        'تاریخ',
+        'مبلغ',
+      ],
+      rows: calls
+          .map(
+            (item) => <Object?>[
+              item.customerName,
+              item.subject,
+              item.type,
+              item.status,
+              item.tradeType,
+              compactDate(item.callAt),
+              formatPersianInteger(item.amount),
+            ],
+          )
+          .toList(),
+    );
+  }
+
+  List<CrmCall> _filteredCalls() {
+    final needle = _search.text.trim().toLowerCase();
+    return widget.store.calls.where((call) {
+      final customer = _customerFor(call);
+      return (needle.isEmpty ||
+              call.customerName.toLowerCase().contains(needle) ||
+              call.subject.toLowerCase().contains(needle) ||
+              call.productName.toLowerCase().contains(needle) ||
+              call.status.contains(needle)) &&
+          (_resultFilter == null || call.status == _resultFilter) &&
+          (_typeFilter == null || call.type == _typeFilter) &&
+          (_tradeFilter == null || call.tradeType == _tradeFilter) &&
+          (_activityFilter == null ||
+              customer?.activityType == _activityFilter) &&
+          (_priorityFilter == null || customer?.priority == _priorityFilter) &&
+          (!_vipOnly || customer?.isVip == true);
+    }).toList();
+  }
+
   @override
   Widget build(BuildContext context) {
     final store = widget.store;
-    final needle = _search.text.trim().toLowerCase();
-    final rows = store.calls.where((call) {
-      return needle.isEmpty ||
-          call.customerName.toLowerCase().contains(needle) ||
-          call.subject.toLowerCase().contains(needle) ||
-          call.productName.toLowerCase().contains(needle) ||
-          call.status.contains(needle);
-    }).toList();
+    final rows = _filteredCalls();
     final values = <Comparable<Object?> Function(CrmCall)>[
       (item) => item.customerName,
       (item) => item.subject,
@@ -104,8 +188,18 @@ class _CallsPageState extends State<CallsPage> {
           title: 'مدیریت تماس‌ها',
           subtitle: 'تماس‌ها، نتیجه، مبلغ احتمالی و پیگیری بعدی را ثبت کنید.',
           actions: [
+            OutlinedButton.icon(
+              onPressed: () => _printCalls(todayOnly: true),
+              icon: const Icon(Icons.assignment_outlined),
+              label: const Text('کارتابل روزانه مدیر'),
+            ),
+            OutlinedButton.icon(
+              onPressed: _printCalls,
+              icon: const Icon(Icons.print_outlined),
+              label: const Text('گزارش و چاپ'),
+            ),
             FilledButton.icon(
-              onPressed: _openEditor,
+              onPressed: () => _openEditor(),
               icon: const Icon(Icons.add_call),
               label: const Text('ثبت تماس جدید'),
             ),
@@ -155,20 +249,128 @@ class _CallsPageState extends State<CallsPage> {
           ],
         ),
         const SizedBox(height: 18),
-        SectionCard(
-          title: 'جست‌وجوی تماس‌ها',
-          child: AutoInputDirection(
-            controller: _search,
-            child: TextField(
-              controller: _search,
-              onChanged: (_) => setState(() {}),
-              decoration: const InputDecoration(
-                prefixIcon: Icon(Icons.search_rounded),
-                hintText: 'مشتری، موضوع، کالا یا نتیجه تماس',
-              ),
+        if (_staleCustomers().isNotEmpty) ...[
+          SectionCard(
+            title: 'هشدار پیگیری؛ بیش از ۱۵ روز بدون تماس',
+            trailing: Text(
+              '${formatPersianInteger(_staleCustomers().length)} مشتری',
+            ),
+            child: Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: _staleCustomers()
+                  .map(
+                    (customer) => ActionChip(
+                      avatar: Icon(
+                        customer.isVip
+                            ? Icons.workspace_premium_rounded
+                            : Icons.notification_important_outlined,
+                        size: 18,
+                      ),
+                      label: Text(customer.displayName),
+                      onPressed: () => _openEditor(null, customer.id),
+                    ),
+                  )
+                  .toList(),
             ),
           ),
+          const SizedBox(height: 18),
+        ],
+        SectionCard(
+          title: 'گزارش تحلیلی تماس‌ها',
+          child: Wrap(
+            spacing: 16,
+            runSpacing: 12,
+            children: const ['موفق', 'پیگیری', 'ناموفق'].map((status) {
+              final count = store.calls
+                  .where((item) => item.status == status)
+                  .length;
+              final ratio = store.calls.isEmpty
+                  ? 0.0
+                  : count / store.calls.length;
+              return SizedBox(
+                width: 240,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('$status: ${formatPersianInteger(count)}'),
+                    const SizedBox(height: 6),
+                    LinearProgressIndicator(value: ratio),
+                  ],
+                ),
+              );
+            }).toList(),
+          ),
         ),
+        const SizedBox(height: 18),
+        SectionCard(
+          title: 'فیلتر هر ستون و دسته‌بندی',
+          child: Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            children: [
+              SizedBox(
+                width: 240,
+                child: AutoInputDirection(
+                  controller: _search,
+                  child: TextField(
+                    controller: _search,
+                    onChanged: (_) => setState(() {}),
+                    decoration: const InputDecoration(
+                      prefixIcon: Icon(Icons.search_rounded),
+                      hintText: 'مشتری، موضوع یا کالا',
+                    ),
+                  ),
+                ),
+              ),
+              _filter(
+                'نتیجه تماس',
+                _resultFilter,
+                const ['موفق', 'پیگیری', 'ناموفق'],
+                (value) => setState(() => _resultFilter = value),
+              ),
+              _filter(
+                'نوع تماس',
+                _typeFilter,
+                const ['تلفنی', 'جلسه', 'استعلام', 'پیام', 'ایمیل'],
+                (value) => setState(() => _typeFilter = value),
+              ),
+              _filter(
+                'خرید / فروش',
+                _tradeFilter,
+                const ['خرید', 'فروش', 'بدون معامله'],
+                (value) => setState(() => _tradeFilter = value),
+              ),
+              _filter(
+                'نوع فعالیت',
+                _activityFilter,
+                store.activityTypes,
+                (value) => setState(() => _activityFilter = value),
+              ),
+              _filter(
+                'اولویت مشتری',
+                _priorityFilter,
+                const ['خیلی بالا', 'بالا', 'متوسط', 'پایین'],
+                (value) => setState(() => _priorityFilter = value),
+              ),
+              _filter(
+                'دسته‌بندی بر اساس',
+                _groupBy,
+                const ['نتیجه تماس', 'نوع فعالیت', 'تاریخ', 'اولویت'],
+                (value) => setState(() => _groupBy = value ?? _groupBy),
+                includeAll: false,
+              ),
+              FilterChip(
+                selected: _vipOnly,
+                avatar: const Icon(Icons.workspace_premium_outlined),
+                label: const Text('مشتریان VIP'),
+                onSelected: (value) => setState(() => _vipOnly = value),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 12),
+        _groupSummary(rows),
         const SizedBox(height: 18),
         SectionCard(
           title: 'فهرست تماس‌ها',
@@ -307,13 +509,70 @@ class _CallsPageState extends State<CallsPage> {
       ],
     );
   }
+
+  Widget _filter(
+    String label,
+    String? value,
+    List<String> values,
+    ValueChanged<String?> changed, {
+    bool includeAll = true,
+  }) => SizedBox(
+    width: 190,
+    child: DropdownButtonFormField<String?>(
+      initialValue: value,
+      decoration: InputDecoration(labelText: label),
+      items: [
+        if (includeAll)
+          const DropdownMenuItem<String?>(value: null, child: Text('همه')),
+        ...values.map(
+          (item) => DropdownMenuItem<String?>(value: item, child: Text(item)),
+        ),
+      ],
+      onChanged: changed,
+    ),
+  );
+
+  Widget _groupSummary(List<CrmCall> calls) {
+    final groups = <String, int>{};
+    for (final call in calls) {
+      final customer = _customerFor(call);
+      final key = switch (_groupBy) {
+        'نوع فعالیت' => customer?.activityType ?? 'نامشخص',
+        'تاریخ' => compactDate(call.callAt),
+        'اولویت' => customer?.priority ?? 'نامشخص',
+        _ => call.status,
+      };
+      groups[key] = (groups[key] ?? 0) + 1;
+    }
+    return SectionCard(
+      title: 'دسته‌بندی بر اساس $_groupBy',
+      child: Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        children: groups.entries
+            .map(
+              (entry) => Chip(
+                label: Text(
+                  '${entry.key}: ${formatPersianInteger(entry.value)}',
+                ),
+              ),
+            )
+            .toList(),
+      ),
+    );
+  }
 }
 
 class _CallEditorDialog extends StatefulWidget {
-  const _CallEditorDialog({required this.store, this.call});
+  const _CallEditorDialog({
+    required this.store,
+    this.call,
+    this.initialCustomerId,
+  });
 
   final CrmStore store;
   final CrmCall? call;
+  final String? initialCustomerId;
 
   @override
   State<_CallEditorDialog> createState() => _CallEditorDialogState();
@@ -341,7 +600,10 @@ class _CallEditorDialogState extends State<_CallEditorDialog> {
   void initState() {
     super.initState();
     final call = widget.call;
-    if (call == null) return;
+    if (call == null) {
+      _customerId = widget.initialCustomerId;
+      return;
+    }
     _customerId = call.customerId;
     _subject.text = call.subject;
     _notes.text = call.notes;

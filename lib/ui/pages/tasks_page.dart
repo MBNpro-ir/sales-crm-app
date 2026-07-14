@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/crm_store.dart';
 import '../../core/models.dart';
+import '../../core/report_service.dart';
 import '../widgets/common.dart';
 
 class TasksPage extends StatefulWidget {
@@ -56,6 +57,32 @@ class _TasksPageState extends State<TasksPage> {
     }
   }
 
+  Future<void> _printReport() => CrmReportService.printTable(
+    title: 'گزارش پیگیری و وظایف',
+    headers: const [
+      'عنوان',
+      'مشتری',
+      'نوع',
+      'اولویت',
+      'وضعیت',
+      'سررسید',
+      'مسئول',
+    ],
+    rows: widget.store.tasks
+        .map(
+          (item) => <Object?>[
+            item.title,
+            item.customerName,
+            item.taskType,
+            item.priority,
+            item.status,
+            item.dueAt == null ? '—' : compactDate(item.dueAt!),
+            item.ownerName,
+          ],
+        )
+        .toList(),
+  );
+
   @override
   Widget build(BuildContext context) {
     final needle = _search.text.trim().toLowerCase();
@@ -81,6 +108,11 @@ class _TasksPageState extends State<TasksPage> {
           subtitle:
               'پیگیری‌های تماس، جلسه، پیش‌فاکتور و سفارش را زمان‌بندی کنید.',
           actions: [
+            OutlinedButton.icon(
+              onPressed: _printReport,
+              icon: const Icon(Icons.print_outlined),
+              label: const Text('گزارش و چاپ'),
+            ),
             FilledButton.icon(
               onPressed: _openEditor,
               icon: const Icon(Icons.add_task_rounded),
@@ -124,6 +156,33 @@ class _TasksPageState extends State<TasksPage> {
               ),
             ),
           ],
+        ),
+        const SizedBox(height: 18),
+        SectionCard(
+          title: 'نمودار تحلیلی وظایف',
+          child: Wrap(
+            spacing: 18,
+            runSpacing: 12,
+            children: const ['خیلی بالا', 'بالا', 'متوسط', 'پایین'].map((
+              priority,
+            ) {
+              final count = tasks
+                  .where((item) => item.priority == priority)
+                  .length;
+              final ratio = tasks.isEmpty ? 0.0 : count / tasks.length;
+              return SizedBox(
+                width: 220,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('$priority: ${formatPersianInteger(count)}'),
+                    const SizedBox(height: 6),
+                    LinearProgressIndicator(value: ratio),
+                  ],
+                ),
+              );
+            }).toList(),
+          ),
         ),
         const SizedBox(height: 18),
         SectionCard(
@@ -221,7 +280,7 @@ class _TaskTile extends StatelessWidget {
         children: [
           Checkbox(
             value: task.isDone,
-            onChanged: task.isDone ? null : (_) => store.completeTask(task),
+            onChanged: (_) => store.toggleTask(task),
           ),
           Container(
             width: 8,

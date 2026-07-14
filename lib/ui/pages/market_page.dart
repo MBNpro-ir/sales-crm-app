@@ -4,13 +4,21 @@ import '../../core/crm_store.dart';
 import '../../core/models.dart';
 import '../widgets/common.dart';
 
-class MarketPage extends StatelessWidget {
+class MarketPage extends StatefulWidget {
   const MarketPage({super.key, required this.store});
 
   final CrmStore store;
 
   @override
+  State<MarketPage> createState() => _MarketPageState();
+}
+
+class _MarketPageState extends State<MarketPage> {
+  String? _selectedProvince;
+
+  @override
   Widget build(BuildContext context) {
+    final store = widget.store;
     final provinces = _countBy(
       store.customers,
       (customer) => customer.province,
@@ -80,6 +88,58 @@ class MarketPage extends StatelessWidget {
             ),
           ],
         ),
+        const SizedBox(height: 18),
+        SectionCard(
+          title: 'نقشه تعاملی ایران',
+          trailing: _selectedProvince == null
+              ? const Text('برای مشاهده تعداد مشتریان روی استان کلیک کنید')
+              : Text(
+                  '$_selectedProvince: ${formatPersianInteger(provinces[_selectedProvince] ?? 0)} مشتری',
+                  style: const TextStyle(fontWeight: FontWeight.w800),
+                ),
+          child: _IranProvinceMap(
+            counts: provinces,
+            selectedProvince: _selectedProvince,
+            onSelected: (value) => setState(() => _selectedProvince = value),
+          ),
+        ),
+        if (_selectedProvince != null) ...[
+          const SizedBox(height: 18),
+          SectionCard(
+            title: 'مشتریان استان $_selectedProvince',
+            child: Builder(
+              builder: (context) {
+                final customers = store.customers
+                    .where((item) => item.province == _selectedProvince)
+                    .toList();
+                if (customers.isEmpty) {
+                  return const EmptyState(
+                    icon: Icons.location_off_outlined,
+                    title: 'مشتری ثبت نشده است',
+                    message: 'در اطلاعات مشتری، استان را تکمیل کنید.',
+                  );
+                }
+                return Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: customers
+                      .map(
+                        (item) => Chip(
+                          avatar: item.isVip
+                              ? const Icon(
+                                  Icons.workspace_premium_rounded,
+                                  size: 18,
+                                )
+                              : null,
+                          label: Text(item.displayName),
+                        ),
+                      )
+                      .toList(),
+                );
+              },
+            ),
+          ),
+        ],
         const SizedBox(height: 18),
         LayoutBuilder(
           builder: (context, constraints) {
@@ -188,6 +248,156 @@ class MarketPage extends StatelessWidget {
   String _customerLabel(CrmCustomer customer) {
     return customer.company.isEmpty ? customer.name : customer.company;
   }
+}
+
+class _IranProvinceMap extends StatelessWidget {
+  const _IranProvinceMap({
+    required this.counts,
+    required this.selectedProvince,
+    required this.onSelected,
+  });
+
+  final Map<String, int> counts;
+  final String? selectedProvince;
+  final ValueChanged<String> onSelected;
+
+  static const _markers = <(String, String, double, double)>[
+    ('آذربایجان غربی', 'آ.غ', .12, .16),
+    ('آذربایجان شرقی', 'آ.ش', .23, .13),
+    ('اردبیل', 'ارد', .31, .08),
+    ('گیلان', 'گیل', .40, .10),
+    ('مازندران', 'ماز', .51, .13),
+    ('گلستان', 'گل', .63, .14),
+    ('خراسان شمالی', 'خ.ش', .73, .17),
+    ('خراسان رضوی', 'خ.ر', .82, .25),
+    ('خراسان جنوبی', 'خ.ج', .78, .48),
+    ('سیستان و بلوچستان', 'س.ب', .82, .72),
+    ('هرمزگان', 'هرم', .62, .82),
+    ('کرمان', 'کر', .66, .64),
+    ('یزد', 'یزد', .55, .53),
+    ('اصفهان', 'اص', .44, .49),
+    ('فارس', 'فارس', .49, .68),
+    ('بوشهر', 'بوش', .38, .76),
+    ('کهگیلویه و بویراحمد', 'ک.ب', .34, .63),
+    ('چهارمحال و بختیاری', 'چ.ب', .37, .54),
+    ('خوزستان', 'خوز', .23, .63),
+    ('ایلام', 'ایلام', .13, .52),
+    ('کرمانشاه', 'کرش', .17, .40),
+    ('کردستان', 'کرد', .22, .31),
+    ('همدان', 'همد', .30, .38),
+    ('لرستان', 'لر', .29, .50),
+    ('مرکزی', 'مرک', .39, .38),
+    ('قم', 'قم', .46, .36),
+    ('تهران', 'تهر', .49, .28),
+    ('البرز', 'الب', .44, .25),
+    ('قزوین', 'قزو', .37, .27),
+    ('زنجان', 'زنج', .30, .25),
+    ('سمنان', 'سمن', .61, .30),
+  ];
+
+  @override
+  Widget build(BuildContext context) => AspectRatio(
+    aspectRatio: 1.85,
+    child: LayoutBuilder(
+      builder: (context, constraints) => Stack(
+        children: [
+          Positioned.fill(
+            child: CustomPaint(
+              painter: _IranOutlinePainter(Theme.of(context).colorScheme),
+            ),
+          ),
+          ..._markers.map((marker) {
+            final (province, short, x, y) = marker;
+            final count = counts[province] ?? 0;
+            final selected = selectedProvince == province;
+            return Positioned(
+              left: constraints.maxWidth * x - 22,
+              top: constraints.maxHeight * y - 15,
+              child: Tooltip(
+                message: '$province — ${formatPersianInteger(count)} مشتری',
+                child: InkWell(
+                  onTap: () => onSelected(province),
+                  borderRadius: BorderRadius.circular(99),
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 160),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 6,
+                      vertical: 4,
+                    ),
+                    decoration: BoxDecoration(
+                      color: selected
+                          ? Theme.of(context).colorScheme.primary
+                          : count > 0
+                          ? Theme.of(context).colorScheme.primaryContainer
+                          : Theme.of(context).colorScheme.surface,
+                      border: Border.all(
+                        color: Theme.of(context).colorScheme.outlineVariant,
+                      ),
+                      borderRadius: BorderRadius.circular(99),
+                    ),
+                    child: Text(
+                      count > 0
+                          ? '$short ${formatPersianInteger(count)}'
+                          : short,
+                      style: TextStyle(
+                        fontSize: 9,
+                        fontWeight: FontWeight.w800,
+                        color: selected
+                            ? Theme.of(context).colorScheme.onPrimary
+                            : null,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            );
+          }),
+        ],
+      ),
+    ),
+  );
+}
+
+class _IranOutlinePainter extends CustomPainter {
+  const _IranOutlinePainter(this.colors);
+
+  final ColorScheme colors;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final path = Path()
+      ..moveTo(size.width * .08, size.height * .12)
+      ..lineTo(size.width * .27, size.height * .04)
+      ..lineTo(size.width * .48, size.height * .08)
+      ..lineTo(size.width * .72, size.height * .12)
+      ..lineTo(size.width * .92, size.height * .31)
+      ..lineTo(size.width * .86, size.height * .52)
+      ..lineTo(size.width * .91, size.height * .84)
+      ..lineTo(size.width * .69, size.height * .91)
+      ..lineTo(size.width * .55, size.height * .82)
+      ..lineTo(size.width * .39, size.height * .88)
+      ..lineTo(size.width * .22, size.height * .73)
+      ..lineTo(size.width * .09, size.height * .57)
+      ..lineTo(size.width * .15, size.height * .37)
+      ..close();
+    canvas.drawPath(
+      path,
+      Paint()
+        ..color = colors.primaryContainer.withValues(alpha: .45)
+        ..style = PaintingStyle.fill,
+    );
+    canvas.drawPath(
+      path,
+      Paint()
+        ..color = colors.primary
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2,
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant _IranOutlinePainter oldDelegate) =>
+      oldDelegate.colors != colors;
 }
 
 class _Distribution extends StatelessWidget {

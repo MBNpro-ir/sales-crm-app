@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
 
 import '../../core/crm_store.dart';
+import '../../core/report_service.dart';
 import '../widgets/common.dart';
 
-class ReportsPage extends StatelessWidget {
+class ReportsPage extends StatefulWidget {
   const ReportsPage({
     super.key,
     required this.store,
@@ -12,6 +13,114 @@ class ReportsPage extends StatelessWidget {
 
   final CrmStore store;
   final bool analyticsOnly;
+
+  @override
+  State<ReportsPage> createState() => _ReportsPageState();
+}
+
+class _ReportsPageState extends State<ReportsPage> {
+  final _customerFilter = TextEditingController();
+  final _productFilter = TextEditingController();
+
+  CrmStore get store => widget.store;
+
+  @override
+  void dispose() {
+    _customerFilter.dispose();
+    _productFilter.dispose();
+    super.dispose();
+  }
+
+  List<_UnifiedReportRow> get _reportRows {
+    final customer = _customerFilter.text.trim().toLowerCase();
+    final product = _productFilter.text.trim().toLowerCase();
+    final rows = <_UnifiedReportRow>[
+      ...store.calls.map(
+        (item) => _UnifiedReportRow(
+          source: 'تماس',
+          number: compactDate(item.callAt),
+          customer: item.customerName,
+          product: item.productName,
+          direction: item.tradeType,
+          status: item.status,
+          amount: item.amount,
+        ),
+      ),
+      ...store.quotes.map(
+        (item) => _UnifiedReportRow(
+          source: 'پیش‌فاکتور',
+          number: item.quoteNumber,
+          customer: item.customerName,
+          product: item.lineItems.map((line) => line.description).join('، '),
+          direction: item.direction,
+          status: item.status,
+          amount: item.totalAmount,
+        ),
+      ),
+      ...store.orders.map(
+        (item) => _UnifiedReportRow(
+          source: item.status == 'فاکتور صادر شد' ? 'فاکتور' : 'سفارش',
+          number: item.orderNumber,
+          customer: item.customerName,
+          product: item.lineItems.map((line) => line.description).join('، '),
+          direction: item.direction,
+          status: item.status,
+          amount: item.totalAmount,
+        ),
+      ),
+    ];
+    return rows.where((item) {
+      return (customer.isEmpty ||
+              item.customer.toLowerCase().contains(customer)) &&
+          (product.isEmpty || item.product.toLowerCase().contains(product));
+    }).toList();
+  }
+
+  List<List<Object?>> get _exportRows => _reportRows
+      .map(
+        (item) => <Object?>[
+          item.source,
+          item.number,
+          item.customer,
+          item.product,
+          item.direction,
+          item.status,
+          item.amount,
+        ],
+      )
+      .toList();
+
+  static const _headers = [
+    'منبع',
+    'شماره / تاریخ',
+    'مشتری',
+    'محصول',
+    'خرید / فروش',
+    'وضعیت',
+    'مبلغ',
+  ];
+
+  Future<void> _export() async {
+    final path = await CrmReportService.exportExcel(
+      suggestedName: 'purchase-sales-report.xlsx',
+      sheetName: 'گزارش خرید و فروش',
+      headers: _headers,
+      rows: _exportRows,
+    );
+    if (mounted && path != null) {
+      showCrmNotice(
+        context,
+        'فایل گزارش خرید و فروش ذخیره شد.',
+        type: CrmNoticeType.success,
+      );
+    }
+  }
+
+  Future<void> _print() => CrmReportService.printTable(
+    title: 'گزارش جامع خرید و فروش',
+    headers: _headers,
+    rows: _exportRows,
+  );
 
   @override
   Widget build(BuildContext context) {
@@ -29,21 +138,22 @@ class ReportsPage extends StatelessWidget {
     return ListView(
       children: [
         CrmPageHeader(
-          title: analyticsOnly ? 'تحلیل‌های فروش' : 'گزارش‌های فروش',
-          subtitle: analyticsOnly
-              ? 'شاخص‌های عملکرد، قیف فروش و نقطه‌های نیازمند توجه.'
+          title: widget.analyticsOnly
+              ? 'تحلیل‌های خرید و فروش'
+              : 'گزارش خرید و فروش',
+          subtitle: widget.analyticsOnly
+              ? 'شاخص‌های عملکرد، قیف خرید و فروش و نقطه‌های نیازمند توجه.'
               : 'خلاصه‌ی روزانه از تماس، خرید، فروش، سفارش و پیش‌فاکتور.',
           actions: [
             OutlinedButton.icon(
-              onPressed: () {
-                showCrmNotice(
-                  context,
-                  'خروجی فایل در نسخه‌ی بعد به انتخاب محل ذخیره متصل می‌شود.',
-                  type: CrmNoticeType.info,
-                );
-              },
+              onPressed: _export,
               icon: const Icon(Icons.file_download_outlined),
               label: const Text('خروجی گزارش'),
+            ),
+            OutlinedButton.icon(
+              onPressed: _print,
+              icon: const Icon(Icons.print_outlined),
+              label: const Text('چاپ'),
             ),
           ],
         ),
@@ -94,6 +204,80 @@ class ReportsPage extends StatelessWidget {
               ),
             ),
           ],
+        ),
+        const SizedBox(height: 18),
+        SectionCard(
+          title: 'فیلتر گزارش بر اساس مشتری یا محصول',
+          child: Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            children: [
+              SizedBox(
+                width: 300,
+                child: TextField(
+                  controller: _customerFilter,
+                  onChanged: (_) => setState(() {}),
+                  decoration: const InputDecoration(
+                    prefixIcon: Icon(Icons.person_search_outlined),
+                    labelText: 'نام مشتری / شرکت',
+                  ),
+                ),
+              ),
+              SizedBox(
+                width: 300,
+                child: TextField(
+                  controller: _productFilter,
+                  onChanged: (_) => setState(() {}),
+                  decoration: const InputDecoration(
+                    prefixIcon: Icon(Icons.inventory_2_outlined),
+                    labelText: 'نام یا شرح محصول',
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 18),
+        SectionCard(
+          title: 'گزارش تجمیعی تماس، پیش‌فاکتور، سفارش و فاکتور',
+          trailing: Text('${formatPersianInteger(_reportRows.length)} ردیف'),
+          padding: const EdgeInsets.all(12),
+          child: _reportRows.isEmpty
+              ? const EmptyState(
+                  icon: Icons.analytics_outlined,
+                  title: 'داده‌ای مطابق فیلتر نیست',
+                  message: 'نام مشتری یا محصول را تغییر دهید.',
+                )
+              : CrmTableScroll(
+                  child: DataTable(
+                    columns: _headers
+                        .map((item) => DataColumn(label: Text(item)))
+                        .toList(),
+                    rows: _reportRows
+                        .map(
+                          (item) => DataRow(
+                            cells: [
+                              DataCell(Text(item.source)),
+                              DataCell(Text(item.number)),
+                              DataCell(Text(item.customer)),
+                              DataCell(
+                                SizedBox(
+                                  width: 180,
+                                  child: Text(
+                                    item.product,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                              ),
+                              DataCell(Text(item.direction)),
+                              DataCell(StatusPill(label: item.status)),
+                              DataCell(Text(compactMoney(item.amount))),
+                            ],
+                          ),
+                        )
+                        .toList(),
+                  ),
+                ),
         ),
         const SizedBox(height: 18),
         LayoutBuilder(
@@ -153,8 +337,10 @@ class ReportsPage extends StatelessWidget {
         ),
         const SizedBox(height: 18),
         SectionCard(
-          title: analyticsOnly ? 'علت‌های نیازمند توجه' : 'گزارش تماس‌های اخیر',
-          child: analyticsOnly
+          title: widget.analyticsOnly
+              ? 'علت‌های نیازمند توجه'
+              : 'گزارش تماس‌های اخیر',
+          child: widget.analyticsOnly
               ? Column(
                   children: [
                     _InsightRow(
@@ -215,6 +401,26 @@ class ReportsPage extends StatelessWidget {
       ],
     );
   }
+}
+
+class _UnifiedReportRow {
+  const _UnifiedReportRow({
+    required this.source,
+    required this.number,
+    required this.customer,
+    required this.product,
+    required this.direction,
+    required this.status,
+    required this.amount,
+  });
+
+  final String source;
+  final String number;
+  final String customer;
+  final String product;
+  final String direction;
+  final String status;
+  final int amount;
 }
 
 class _Funnel extends StatelessWidget {

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/crm_store.dart';
 import '../../core/models.dart';
+import '../../core/report_service.dart';
 import '../widgets/common.dart';
 
 class CustomersPage extends StatefulWidget {
@@ -15,12 +16,26 @@ class CustomersPage extends StatefulWidget {
 
 class _CustomersPageState extends State<CustomersPage> {
   final _search = TextEditingController();
+  final _codeFilter = TextEditingController();
+  final _nameFilter = TextEditingController();
+  final _mobileFilter = TextEditingController();
+  final _cityFilter = TextEditingController();
   int _sortColumn = 0;
   bool _sortAscending = true;
+  String? _activityFilter;
+  String? _statusFilter;
+  String? _priorityFilter;
+  String? _provinceFilter;
+  String _groupBy = 'نوع فعالیت';
+  bool _vipOnly = false;
 
   @override
   void dispose() {
     _search.dispose();
+    _codeFilter.dispose();
+    _nameFilter.dispose();
+    _mobileFilter.dispose();
+    _cityFilter.dispose();
     super.dispose();
   }
 
@@ -62,17 +77,179 @@ class _CustomersPageState extends State<CustomersPage> {
     });
   }
 
-  @override
-  Widget build(BuildContext context) {
+  List<CrmCustomer> _filteredCustomers() {
     final needle = _search.text.trim().toLowerCase();
-    final rows = widget.store.customers.where((customer) {
-      if (needle.isEmpty) return true;
-      return customer.name.toLowerCase().contains(needle) ||
+    return widget.store.customers.where((customer) {
+      final matchesSearch =
+          needle.isEmpty ||
+          customer.name.toLowerCase().contains(needle) ||
           customer.company.toLowerCase().contains(needle) ||
           customer.mobile.contains(needle) ||
           customer.city.toLowerCase().contains(needle);
+      return matchesSearch &&
+          (_codeFilter.text.trim().isEmpty ||
+              customer.customerCode.contains(_codeFilter.text.trim())) &&
+          (_nameFilter.text.trim().isEmpty ||
+              customer.displayName.toLowerCase().contains(
+                _nameFilter.text.trim().toLowerCase(),
+              )) &&
+          (_mobileFilter.text.trim().isEmpty ||
+              customer.mobile.contains(_mobileFilter.text.trim())) &&
+          (_cityFilter.text.trim().isEmpty ||
+              customer.city.toLowerCase().contains(
+                _cityFilter.text.trim().toLowerCase(),
+              )) &&
+          (_activityFilter == null ||
+              customer.activityType == _activityFilter) &&
+          (_statusFilter == null || customer.status == _statusFilter) &&
+          (_priorityFilter == null || customer.priority == _priorityFilter) &&
+          (_provinceFilter == null || customer.province == _provinceFilter) &&
+          (!_vipOnly || customer.isVip);
     }).toList();
+  }
+
+  List<List<Object?>> _rowsForExport(List<CrmCustomer> customers) => customers
+      .map(
+        (item) => <Object?>[
+          item.customerCode,
+          item.name,
+          item.company,
+          item.mobile,
+          item.phone,
+          item.province,
+          item.city,
+          item.activityType,
+          item.status,
+          item.priority,
+          item.isVip ? 'بله' : 'خیر',
+          item.details['email'] ?? '',
+          item.details['address'] ?? '',
+          item.tags.join(', '),
+          item.notes,
+        ],
+      )
+      .toList();
+
+  static const _exportHeaders = [
+    'کد مشتری',
+    'نام مخاطب',
+    'نام شرکت',
+    'موبایل',
+    'تلفن',
+    'استان',
+    'شهر',
+    'نوع فعالیت',
+    'وضعیت',
+    'اولویت',
+    'VIP',
+    'ایمیل',
+    'آدرس',
+    'برچسب‌ها',
+    'یادداشت',
+  ];
+
+  Future<void> _exportExcel() async {
+    final rows = _filteredCustomers();
+    final path = await CrmReportService.exportExcel(
+      suggestedName: 'customers.xlsx',
+      sheetName: 'مشتریان',
+      headers: _exportHeaders,
+      rows: _rowsForExport(rows),
+    );
+    if (mounted && path != null) {
+      showCrmNotice(
+        context,
+        'خروجی اکسل مشتریان ذخیره شد.',
+        type: CrmNoticeType.success,
+      );
+    }
+  }
+
+  Future<void> _importExcel() async {
+    final table = await CrmReportService.pickExcelRows();
+    if (table == null || table.isEmpty) return;
+    const aliases = <String, String>{
+      'کد مشتری': 'customer_code',
+      'نام مخاطب': 'name',
+      'نام': 'name',
+      'نام شرکت': 'company',
+      'شرکت': 'company',
+      'موبایل': 'mobile',
+      'تلفن': 'phone',
+      'استان': 'province',
+      'شهر': 'city',
+      'نوع فعالیت': 'activity_type',
+      'وضعیت': 'status',
+      'اولویت': 'priority',
+      'VIP': 'is_vip',
+      'وی آی پی': 'is_vip',
+      'ایمیل': 'email',
+      'آدرس': 'address',
+      'برچسب‌ها': 'tags',
+      'یادداشت': 'notes',
+    };
+    final headers = table.first.map((item) => aliases[item] ?? '').toList();
+    final records = <Map<String, String>>[];
+    for (final row in table.skip(1)) {
+      final record = <String, String>{};
+      for (var index = 0; index < headers.length; index++) {
+        if (headers[index].isNotEmpty && index < row.length) {
+          record[headers[index]] = row[index];
+        }
+      }
+      records.add(record);
+    }
+    final count = await widget.store.importCustomerRows(records);
+    if (mounted) {
+      showCrmNotice(
+        context,
+        '${formatPersianInteger(count)} مشتری از اکسل ثبت یا به‌روزرسانی شد.',
+        type: count == 0 ? CrmNoticeType.warning : CrmNoticeType.success,
+      );
+    }
+  }
+
+  Future<void> _printPhonebook() => CrmReportService.printTable(
+    title: 'دفترچه تلفن مشتریان',
+    headers: const [
+      'کد',
+      'نام / شرکت',
+      'موبایل',
+      'تلفن',
+      'استان',
+      'شهر',
+      'فعالیت',
+    ],
+    rows: _filteredCustomers()
+        .map(
+          (item) => <Object?>[
+            item.customerCode,
+            item.displayName,
+            item.mobile,
+            item.phone,
+            item.province,
+            item.city,
+            item.activityType,
+          ],
+        )
+        .toList(),
+  );
+
+  Future<void> _copyPhonebook() async {
+    await CrmReportService.copyTable(
+      headers: const ['نام / شرکت', 'موبایل', 'تلفن'],
+      rows: _filteredCustomers()
+          .map((item) => <Object?>[item.displayName, item.mobile, item.phone])
+          .toList(),
+    );
+    if (mounted) showCrmNotice(context, 'دفترچه تلفن در کلیپ‌بورد کپی شد.');
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final rows = _filteredCustomers();
     final comparators = <Comparable<Object?> Function(CrmCustomer)>[
+      (item) => item.customerCode,
       (item) => item.company.isEmpty ? item.name : item.company,
       (item) => item.mobile,
       (item) => item.city,
@@ -92,6 +269,31 @@ class _CustomersPageState extends State<CustomersPage> {
           subtitle:
               'اطلاعات مشتری، وضعیت ارتباط و اولویت فروش را یکجا نگه دارید.',
           actions: [
+            OutlinedButton.icon(
+              onPressed: _importExcel,
+              icon: const Icon(Icons.upload_file_outlined),
+              label: const Text('ورودی اکسل'),
+            ),
+            PopupMenuButton<String>(
+              tooltip: 'خروجی و چاپ',
+              onSelected: (value) {
+                if (value == 'excel') _exportExcel();
+                if (value == 'print') _printPhonebook();
+                if (value == 'copy') _copyPhonebook();
+              },
+              itemBuilder: (context) => const [
+                PopupMenuItem(value: 'excel', child: Text('خروجی Excel')),
+                PopupMenuItem(value: 'print', child: Text('چاپ دفترچه تلفن')),
+                PopupMenuItem(value: 'copy', child: Text('کپی دفترچه تلفن')),
+              ],
+              child: IgnorePointer(
+                child: OutlinedButton.icon(
+                  onPressed: () {},
+                  icon: const Icon(Icons.ios_share_outlined),
+                  label: const Text('خروجی'),
+                ),
+              ),
+            ),
             FilledButton.icon(
               onPressed: _openEditor,
               icon: const Icon(Icons.person_add_alt_1_rounded),
@@ -101,19 +303,98 @@ class _CustomersPageState extends State<CustomersPage> {
         ),
         const SizedBox(height: 22),
         SectionCard(
-          title: 'جست‌وجو و فیلتر',
-          child: AutoInputDirection(
-            controller: _search,
-            child: TextField(
-              controller: _search,
-              onChanged: (_) => setState(() {}),
-              decoration: const InputDecoration(
-                hintText: 'نام، شرکت، موبایل یا شهر را وارد کنید',
-                prefixIcon: Icon(Icons.search_rounded),
+          title: 'فیلتر هر ستون و دسته‌بندی',
+          child: Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            children: [
+              _filterText(_search, 'جست‌وجوی سراسری', Icons.search_rounded),
+              _filterText(_codeFilter, 'کد مشتری', Icons.numbers_rounded),
+              _filterText(_nameFilter, 'نام / شرکت', Icons.person_outline),
+              _filterText(_mobileFilter, 'موبایل', Icons.phone_android),
+              _filterText(_cityFilter, 'شهر', Icons.location_city_outlined),
+              _filterDropdown(
+                'نوع فعالیت',
+                _activityFilter,
+                widget.store.activityTypes,
+                (value) => setState(() => _activityFilter = value),
               ),
-            ),
+              _filterDropdown(
+                'وضعیت',
+                _statusFilter,
+                widget.store.customerStatuses,
+                (value) => setState(() => _statusFilter = value),
+              ),
+              _filterDropdown(
+                'اولویت',
+                _priorityFilter,
+                const ['خیلی بالا', 'بالا', 'متوسط', 'پایین'],
+                (value) => setState(() => _priorityFilter = value),
+              ),
+              _filterDropdown(
+                'استان',
+                _provinceFilter,
+                widget.store.customers
+                    .map((item) => item.province)
+                    .where((item) => item.isNotEmpty)
+                    .toSet()
+                    .toList(),
+                (value) => setState(() => _provinceFilter = value),
+              ),
+              SizedBox(
+                width: 190,
+                child: DropdownButtonFormField<String>(
+                  initialValue: _groupBy,
+                  decoration: const InputDecoration(
+                    labelText: 'دسته‌بندی بر اساس',
+                  ),
+                  items: const ['نوع فعالیت', 'اولویت', 'استان', 'وضعیت']
+                      .map(
+                        (item) =>
+                            DropdownMenuItem(value: item, child: Text(item)),
+                      )
+                      .toList(),
+                  onChanged: (value) =>
+                      setState(() => _groupBy = value ?? _groupBy),
+                ),
+              ),
+              FilterChip(
+                selected: _vipOnly,
+                label: const Text('فقط مشتریان VIP'),
+                avatar: const Icon(Icons.workspace_premium_outlined),
+                onSelected: (value) => setState(() => _vipOnly = value),
+              ),
+            ],
           ),
         ),
+        if (rows.any((item) => item.isVip)) ...[
+          const SizedBox(height: 18),
+          SectionCard(
+            title: 'مشتریان VIP',
+            trailing: Text(
+              '${formatPersianInteger(rows.where((item) => item.isVip).length)} مشتری',
+            ),
+            child: Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: rows
+                  .where((item) => item.isVip)
+                  .map(
+                    (item) => ActionChip(
+                      avatar: const Icon(
+                        Icons.workspace_premium_rounded,
+                        size: 18,
+                      ),
+                      label: Text(item.displayName),
+                      onPressed: () => _openEditor(item),
+                    ),
+                  )
+                  .toList(),
+            ),
+          ),
+        ],
+        const SizedBox(height: 18),
+        _groupSummary(rows),
         const SizedBox(height: 18),
         if (rows.isEmpty)
           const SectionCard(
@@ -144,31 +425,37 @@ class _CustomersPageState extends State<CustomersPage> {
                 sortAscending: _sortAscending,
                 columns: [
                   DataColumn(
-                    label: const Text('نام / شرکت'),
+                    label: const Text('کد مشتری'),
                     onSort: (_, _) => _sort(0),
                   ),
                   DataColumn(
-                    label: const Text('موبایل'),
+                    label: const Text('نام / شرکت'),
                     onSort: (_, _) => _sort(1),
                   ),
                   DataColumn(
-                    label: const Text('شهر'),
+                    label: const Text('موبایل'),
                     onSort: (_, _) => _sort(2),
+                  ),
+                  DataColumn(
+                    label: const Text('شهر'),
+                    onSort: (_, _) => _sort(3),
                   ),
                   const DataColumn(label: Text('نوع فعالیت')),
                   DataColumn(
                     label: const Text('وضعیت'),
-                    onSort: (_, _) => _sort(3),
+                    onSort: (_, _) => _sort(4),
                   ),
                   DataColumn(
                     label: const Text('اولویت'),
-                    onSort: (_, _) => _sort(4),
+                    onSort: (_, _) => _sort(5),
                   ),
+                  const DataColumn(label: Text('VIP')),
                   const DataColumn(label: Text('عملیات')),
                 ],
                 rows: rows.map((customer) {
                   return DataRow(
                     cells: [
+                      DataCell(Text(customer.customerCode)),
                       DataCell(
                         SizedBox(
                           width: 210,
@@ -199,6 +486,16 @@ class _CustomersPageState extends State<CustomersPage> {
                       DataCell(StatusPill(label: customer.status)),
                       DataCell(Text(customer.priority)),
                       DataCell(
+                        Icon(
+                          customer.isVip
+                              ? Icons.workspace_premium_rounded
+                              : Icons.remove,
+                          color: customer.isVip
+                              ? const Color(0xffe58a00)
+                              : null,
+                        ),
+                      ),
+                      DataCell(
                         RecordActions(
                           onEdit: () => _openEditor(customer),
                           onDelete: () => _delete(customer),
@@ -211,6 +508,69 @@ class _CustomersPageState extends State<CustomersPage> {
             ),
           ),
       ],
+    );
+  }
+
+  Widget _filterText(
+    TextEditingController controller,
+    String label,
+    IconData icon,
+  ) => SizedBox(
+    width: 190,
+    child: TextField(
+      controller: controller,
+      onChanged: (_) => setState(() {}),
+      decoration: InputDecoration(labelText: label, prefixIcon: Icon(icon)),
+    ),
+  );
+
+  Widget _filterDropdown(
+    String label,
+    String? value,
+    List<String> values,
+    ValueChanged<String?> changed,
+  ) => SizedBox(
+    width: 190,
+    child: DropdownButtonFormField<String?>(
+      initialValue: value,
+      decoration: InputDecoration(labelText: label),
+      items: [
+        const DropdownMenuItem<String?>(value: null, child: Text('همه')),
+        ...values.toSet().map(
+          (item) => DropdownMenuItem<String?>(value: item, child: Text(item)),
+        ),
+      ],
+      onChanged: changed,
+    ),
+  );
+
+  Widget _groupSummary(List<CrmCustomer> rows) {
+    final groups = <String, int>{};
+    for (final item in rows) {
+      final rawKey = switch (_groupBy) {
+        'اولویت' => item.priority,
+        'استان' => item.province,
+        'وضعیت' => item.status,
+        _ => item.activityType,
+      };
+      final key = rawKey.isEmpty ? 'نامشخص' : rawKey;
+      groups[key] = (groups[key] ?? 0) + 1;
+    }
+    return SectionCard(
+      title: 'خلاصه دسته‌بندی بر اساس $_groupBy',
+      child: Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        children: groups.entries
+            .map(
+              (entry) => Chip(
+                label: Text(
+                  '${entry.key}: ${formatPersianInteger(entry.value)}',
+                ),
+              ),
+            )
+            .toList(),
+      ),
     );
   }
 }
@@ -227,6 +587,7 @@ class _CustomerEditorDialog extends StatefulWidget {
 
 class _CustomerEditorDialogState extends State<_CustomerEditorDialog> {
   final _formKey = GlobalKey<FormState>();
+  final _customerCode = TextEditingController();
   final _name = TextEditingController();
   final _company = TextEditingController();
   final _mobile = TextEditingController();
@@ -246,16 +607,24 @@ class _CustomerEditorDialogState extends State<_CustomerEditorDialog> {
   final _fax = TextEditingController();
   final _website = TextEditingController();
   final _notes = TextEditingController();
+  final _tags = TextEditingController();
   String _activity = 'تولیدکننده';
   String _status = 'فعال';
   String _priority = 'متوسط';
+  bool _isVip = false;
   bool _saving = false;
 
   @override
   void initState() {
     super.initState();
     final customer = widget.customer;
-    if (customer == null) return;
+    if (customer == null) {
+      _customerCode.text = widget.store.nextCustomerCode();
+      return;
+    }
+    _customerCode.text = customer.customerCode.isEmpty
+        ? widget.store.nextCustomerCode()
+        : customer.customerCode;
     _name.text = customer.name;
     _company.text = customer.company;
     _mobile.text = formatPersianDigitsOnly(customer.mobile);
@@ -266,6 +635,8 @@ class _CustomerEditorDialogState extends State<_CustomerEditorDialog> {
     _status = customer.status;
     _priority = customer.priority;
     _notes.text = customer.notes;
+    _tags.text = customer.tags.join('، ');
+    _isVip = customer.isVip;
     final details = customer.details;
     _email.text = details['email'] ?? '';
     _secondaryMobile.text = formatPersianDigitsOnly(
@@ -287,6 +658,7 @@ class _CustomerEditorDialogState extends State<_CustomerEditorDialog> {
 
   @override
   void dispose() {
+    _customerCode.dispose();
     _name.dispose();
     _company.dispose();
     _mobile.dispose();
@@ -306,6 +678,7 @@ class _CustomerEditorDialogState extends State<_CustomerEditorDialog> {
     _fax.dispose();
     _website.dispose();
     _notes.dispose();
+    _tags.dispose();
     super.dispose();
   }
 
@@ -325,7 +698,15 @@ class _CustomerEditorDialogState extends State<_CustomerEditorDialog> {
       status: _status,
       priority: _priority,
       notes: _notes.text,
+      tags: _tags.text
+          .split(RegExp(r'[,،]'))
+          .map((item) => item.trim())
+          .where((item) => item.isNotEmpty)
+          .toList(),
       details: {
+        ...?widget.customer?.details,
+        'customer_code': _customerCode.text.trim(),
+        'is_vip': _isVip ? 'true' : 'false',
         'email': _email.text.trim(),
         'secondary_mobile': formatPersianDigitsOnly(_secondaryMobile.text),
         'national_id': formatPersianDigitsOnly(_nationalId.text),
@@ -356,6 +737,40 @@ class _CustomerEditorDialogState extends State<_CustomerEditorDialog> {
           child: SingleChildScrollView(
             child: ResponsiveFormGrid(
               children: [
+                _input(
+                  _customerCode,
+                  TextFormField(
+                    controller: _customerCode,
+                    decoration: const InputDecoration(
+                      labelText: 'کد مشتری *',
+                      prefixIcon: Icon(Icons.numbers_rounded),
+                    ),
+                    validator: (value) {
+                      final code = value?.trim() ?? '';
+                      if (code.isEmpty) return 'کد مشتری الزامی است.';
+                      final duplicate = widget.store.customers.any(
+                        (item) =>
+                            item.id != widget.customer?.id &&
+                            item.customerCode.toLowerCase() ==
+                                code.toLowerCase(),
+                      );
+                      return duplicate
+                          ? 'این کد مشتری قبلاً ثبت شده است.'
+                          : null;
+                    },
+                  ),
+                ),
+                ResponsiveFormField(
+                  child: SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    value: _isVip,
+                    title: const Text('مشتری VIP'),
+                    subtitle: const Text(
+                      'نمایش در فهرست ویژه و پیگیری‌های اولویت‌دار',
+                    ),
+                    onChanged: (value) => setState(() => _isVip = value),
+                  ),
+                ),
                 _input(
                   _name,
                   TextFormField(
@@ -459,26 +874,21 @@ class _CustomerEditorDialogState extends State<_CustomerEditorDialog> {
                 _wideField(
                   DropdownButtonFormField<String>(
                     initialValue: _activity,
-                    decoration: const InputDecoration(labelText: 'نوع فعالیت'),
-                    items: const [
-                      DropdownMenuItem(
-                        value: 'تولیدکننده',
-                        child: Text('تولیدکننده'),
+                    isExpanded: true,
+                    decoration: InputDecoration(
+                      labelText: 'نوع فعالیت',
+                      suffixIcon: IconButton(
+                        tooltip: 'افزودن نوع فعالیت',
+                        onPressed: () => _addOption(activity: true),
+                        icon: const Icon(Icons.add_circle_outline),
                       ),
-                      DropdownMenuItem(
-                        value: 'بازرگان',
-                        child: Text('بازرگان'),
-                      ),
-                      DropdownMenuItem(
-                        value: 'بازیافت',
-                        child: Text('بازیافت'),
-                      ),
-                      DropdownMenuItem(
-                        value: 'فروشنده',
-                        child: Text('فروشنده'),
-                      ),
-                      DropdownMenuItem(value: 'سایر', child: Text('سایر')),
-                    ],
+                    ),
+                    items: {...widget.store.activityTypes, _activity}
+                        .map(
+                          (item) =>
+                              DropdownMenuItem(value: item, child: Text(item)),
+                        )
+                        .toList(),
                     onChanged: (value) {
                       setState(() {
                         _activity = value ?? _activity;
@@ -489,18 +899,21 @@ class _CustomerEditorDialogState extends State<_CustomerEditorDialog> {
                 _wideField(
                   DropdownButtonFormField<String>(
                     initialValue: _status,
-                    decoration: const InputDecoration(labelText: 'وضعیت مشتری'),
-                    items: const [
-                      DropdownMenuItem(value: 'فعال', child: Text('فعال')),
-                      DropdownMenuItem(
-                        value: 'مشتری بالقوه',
-                        child: Text('مشتری بالقوه'),
+                    isExpanded: true,
+                    decoration: InputDecoration(
+                      labelText: 'وضعیت مشتری',
+                      suffixIcon: IconButton(
+                        tooltip: 'افزودن وضعیت مشتری',
+                        onPressed: () => _addOption(activity: false),
+                        icon: const Icon(Icons.add_circle_outline),
                       ),
-                      DropdownMenuItem(
-                        value: 'غیر فعال',
-                        child: Text('غیر فعال'),
-                      ),
-                    ],
+                    ),
+                    items: {...widget.store.customerStatuses, _status}
+                        .map(
+                          (item) =>
+                              DropdownMenuItem(value: item, child: Text(item)),
+                        )
+                        .toList(),
                     onChanged: (value) {
                       setState(() {
                         _status = value ?? _status;
@@ -526,6 +939,18 @@ class _CustomerEditorDialogState extends State<_CustomerEditorDialog> {
                         _priority = value ?? _priority;
                       });
                     },
+                  ),
+                ),
+                ResponsiveFormField.full(
+                  child: AutoInputDirection(
+                    controller: _tags,
+                    child: TextFormField(
+                      controller: _tags,
+                      decoration: const InputDecoration(
+                        labelText: 'برچسب‌ها / دسته‌های مشتری',
+                        hintText: 'مثلاً عمده‌فروش، تهران، پیگیری ویژه',
+                      ),
+                    ),
                   ),
                 ),
                 ResponsiveFormField.full(
@@ -661,6 +1086,41 @@ class _CustomerEditorDialogState extends State<_CustomerEditorDialog> {
   }
 
   Widget _wideField(Widget child) => child;
+
+  Future<void> _addOption({required bool activity}) async {
+    final controller = TextEditingController();
+    final value = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(activity ? 'نوع فعالیت جدید' : 'وضعیت مشتری جدید'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          decoration: const InputDecoration(labelText: 'عنوان'),
+          onSubmitted: (value) => Navigator.of(context).pop(value),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('انصراف'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(controller.text),
+            child: const Text('افزودن'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (value == null || value.trim().isEmpty) return;
+    if (activity) {
+      await widget.store.addActivityType(value);
+      setState(() => _activity = value.trim());
+    } else {
+      await widget.store.addCustomerStatus(value);
+      setState(() => _status = value.trim());
+    }
+  }
 
   Widget _input(TextEditingController controller, Widget child) {
     return _wideField(AutoInputDirection(controller: controller, child: child));

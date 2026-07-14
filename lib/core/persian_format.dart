@@ -71,3 +71,17 @@ String formatJalaliDate(DateTime value, {bool includeTime = false}) {
       '${local.minute.toString().padLeft(2, '0')}';
   return '${toPersianDigits(date)}، ${toPersianDigits(time)}';
 }
+
+String persianWeekday(DateTime value) => switch (value.toLocal().weekday) {
+  DateTime.monday => 'دوشنبه',
+  DateTime.tuesday => 'سه‌شنبه',
+  DateTime.wednesday => 'چهارشنبه',
+  DateTime.thursday => 'پنجشنبه',
+  DateTime.friday => 'جمعه',
+  DateTime.saturday => 'شنبه',
+  _ => 'یکشنبه',
+};
+
+String formatJalaliDateWithWeekday(DateTime value) {
+  return '${persianWeekday(value)}، ${formatJalaliDate(value)}';
+}

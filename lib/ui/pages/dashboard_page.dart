@@ -4,9 +4,14 @@ import '../../core/crm_store.dart';
 import '../widgets/common.dart';
 
 class DashboardPage extends StatelessWidget {
-  const DashboardPage({super.key, required this.store});
+  const DashboardPage({
+    super.key,
+    required this.store,
+    required this.onOpenCalls,
+  });
 
   final CrmStore store;
+  final ValueChanged<String?> onOpenCalls;
 
   @override
   Widget build(BuildContext context) {
@@ -19,9 +24,9 @@ class DashboardPage extends StatelessWidget {
           subtitle: 'نمای کلی فعالیت تیم و اولویت‌های امروز',
           actions: [
             OutlinedButton.icon(
-              onPressed: () {},
+              onPressed: null,
               icon: const Icon(Icons.calendar_month_outlined),
-              label: const Text('امروز'),
+              label: Text(formatJalaliDateWithWeekday(DateTime.now())),
             ),
           ],
         ),
@@ -58,6 +63,29 @@ class DashboardPage extends StatelessWidget {
                 icon: Icons.phone_in_talk_rounded,
                 color: const Color(0xff8349d6),
                 change: 'از ' + store.calls.length.toString() + ' تماس',
+                onTap: () => onOpenCalls('موفق'),
+              ),
+            ),
+            SizedBox(
+              width: kpiWidth,
+              child: KpiCard(
+                title: 'تماس‌های ناموفق',
+                value: store.unsuccessfulCalls.toString(),
+                icon: Icons.phone_missed_rounded,
+                color: const Color(0xffd84b4b),
+                change: 'مشاهده و ثبت تماس جدید',
+                onTap: () => onOpenCalls('ناموفق'),
+              ),
+            ),
+            SizedBox(
+              width: kpiWidth,
+              child: KpiCard(
+                title: 'نیازمند پیگیری',
+                value: store.followUpCalls.toString(),
+                icon: Icons.phone_callback_outlined,
+                color: const Color(0xffe58a00),
+                change: 'مشاهده فهرست پیگیری',
+                onTap: () => onOpenCalls('پیگیری'),
               ),
             ),
             SizedBox(
@@ -87,7 +115,7 @@ class DashboardPage extends StatelessWidget {
                   child: SectionCard(
                     title: 'روند تماس‌های هفتگی',
                     trailing: TextButton(
-                      onPressed: () {},
+                      onPressed: () => onOpenCalls(null),
                       child: const Text('گزارش کامل'),
                     ),
                     child: const SizedBox(height: 220, child: _ContactTrend()),
@@ -121,7 +149,7 @@ class DashboardPage extends StatelessWidget {
                   child: SectionCard(
                     title: 'آخرین تماس‌ها',
                     trailing: TextButton(
-                      onPressed: () {},
+                      onPressed: () => onOpenCalls(null),
                       child: const Text('مشاهده همه'),
                     ),
                     child: _RecentCalls(store: store),

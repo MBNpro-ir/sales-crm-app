@@ -7,6 +7,7 @@ import 'pages/customers_page.dart';
 import 'pages/dashboard_page.dart';
 import 'pages/documents_page.dart';
 import 'pages/guide_page.dart';
+import 'pages/invoices_page.dart';
 import 'pages/market_page.dart';
 import 'pages/opportunities_page.dart';
 import 'pages/performance_page.dart';
@@ -28,18 +29,21 @@ class AppShell extends StatefulWidget {
 class _AppShellState extends State<AppShell> {
   final _scaffoldKey = GlobalKey<ScaffoldState>();
   int _selectedIndex = 0;
+  String? _initialCallStatus;
 
   static const _items = [
     _NavigationItem('داشبورد', Icons.dashboard_rounded),
     _NavigationItem('مشتریان', Icons.people_alt_rounded),
     _NavigationItem('تماس‌ها و جلسات', Icons.phone_in_talk_rounded),
-    _NavigationItem('فرصت‌های فروش', Icons.track_changes_rounded),
+    _NavigationItem('فرصت‌های خرید و فروش', Icons.track_changes_rounded),
     _NavigationItem('پیگیری و وظایف', Icons.task_alt_rounded),
-    _NavigationItem('تقویم فروش', Icons.calendar_month_outlined),
+    _NavigationItem('تقویم خرید و فروش', Icons.calendar_month_outlined),
     _NavigationItem('پیش‌فاکتورها', Icons.request_quote_outlined),
     _NavigationItem('سفارش‌ها', Icons.shopping_cart_outlined),
+    _NavigationItem('فاکتور خرید', Icons.receipt_long_outlined),
+    _NavigationItem('فاکتور فروش', Icons.receipt_outlined),
     _NavigationItem('کالا و موجودی', Icons.inventory_2_outlined),
-    _NavigationItem('گزارش‌های فروش', Icons.bar_chart_rounded),
+    _NavigationItem('گزارش خرید و فروش', Icons.bar_chart_rounded),
     _NavigationItem('تحلیل‌ها (BI)', Icons.query_stats_outlined),
     _NavigationItem('نقشه بازار', Icons.public_outlined),
     _NavigationItem('عملکرد فروش', Icons.workspace_premium_outlined),
@@ -50,11 +54,23 @@ class _AppShellState extends State<AppShell> {
   Widget _page() {
     switch (_selectedIndex) {
       case 0:
-        return DashboardPage(store: widget.store);
+        return DashboardPage(
+          store: widget.store,
+          onOpenCalls: (status) {
+            setState(() {
+              _initialCallStatus = status;
+              _selectedIndex = 2;
+            });
+          },
+        );
       case 1:
         return CustomersPage(store: widget.store);
       case 2:
-        return CallsPage(store: widget.store);
+        return CallsPage(
+          key: ValueKey(_initialCallStatus),
+          store: widget.store,
+          initialStatus: _initialCallStatus,
+        );
       case 3:
         return OpportunitiesPage(store: widget.store);
       case 4:
@@ -66,18 +82,22 @@ class _AppShellState extends State<AppShell> {
       case 7:
         return DocumentsPage(store: widget.store, mode: DocumentPageMode.order);
       case 8:
-        return ProductsPage(store: widget.store);
+        return InvoicesPage(store: widget.store, direction: 'خرید');
       case 9:
-        return ReportsPage(store: widget.store);
+        return InvoicesPage(store: widget.store, direction: 'فروش');
       case 10:
-        return ReportsPage(store: widget.store, analyticsOnly: true);
+        return ProductsPage(store: widget.store);
       case 11:
-        return MarketPage(store: widget.store);
+        return ReportsPage(store: widget.store);
       case 12:
-        return PerformancePage(store: widget.store);
+        return ReportsPage(store: widget.store, analyticsOnly: true);
       case 13:
-        return const GuidePage();
+        return MarketPage(store: widget.store);
       case 14:
+        return PerformancePage(store: widget.store);
+      case 15:
+        return const GuidePage();
+      case 16:
       default:
         return SettingsPage(store: widget.store);
     }
@@ -86,6 +106,7 @@ class _AppShellState extends State<AppShell> {
   void _selectPage(int index, {bool closeDrawer = false}) {
     setState(() {
       _selectedIndex = index;
+      _initialCallStatus = null;
     });
     if (closeDrawer) Navigator.of(context).pop();
   }

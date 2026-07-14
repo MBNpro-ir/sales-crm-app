@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/crm_store.dart';
 import '../../core/models.dart';
+import '../../core/report_service.dart';
 import '../widgets/common.dart';
 
 class OpportunitiesPage extends StatefulWidget {
@@ -17,6 +18,8 @@ class _OpportunitiesPageState extends State<OpportunitiesPage> {
   final _search = TextEditingController();
   int _sortColumn = 4;
   bool _sortAscending = false;
+  String? _tradeFilter;
+  bool _showRealized = false;
 
   @override
   void dispose() {
@@ -67,16 +70,63 @@ class _OpportunitiesPageState extends State<OpportunitiesPage> {
     }
   });
 
+  Future<void> _toggleRealized(CrmOpportunity item, bool realized) async {
+    final customer = widget.store.customers.firstWhere(
+      (customer) => customer.id == item.customerId,
+    );
+    await widget.store.saveOpportunity(
+      id: item.id,
+      customer: customer,
+      title: item.title,
+      stage: realized ? 'برنده شده' : 'مذاکره',
+      amount: item.amount,
+      probability: realized ? 100 : item.probability.clamp(0, 95),
+      notes: item.notes,
+      expectedClose: item.expectedClose,
+      tradeType: item.tradeType,
+    );
+  }
+
+  Future<void> _printReport() => CrmReportService.printTable(
+    title: 'گزارش فرصت‌های خرید و فروش',
+    headers: const [
+      'مشتری',
+      'عنوان',
+      'نوع',
+      'مرحله',
+      'مبلغ',
+      'احتمال',
+      'تاریخ هدف',
+    ],
+    rows: widget.store.opportunities
+        .map(
+          (item) => <Object?>[
+            item.customerName,
+            item.title,
+            item.tradeType,
+            item.stage,
+            formatPersianInteger(item.amount),
+            '${formatPersianInteger(item.probability)}٪',
+            item.expectedClose == null ? '—' : compactDate(item.expectedClose!),
+          ],
+        )
+        .toList(),
+  );
+
   @override
   Widget build(BuildContext context) {
     final needle = _search.text.trim().toLowerCase();
     final rows = widget.store.opportunities
         .where(
           (item) =>
-              needle.isEmpty ||
-              item.title.toLowerCase().contains(needle) ||
-              item.customerName.toLowerCase().contains(needle) ||
-              item.stage.contains(needle),
+              (needle.isEmpty ||
+                  item.title.toLowerCase().contains(needle) ||
+                  item.customerName.toLowerCase().contains(needle) ||
+                  item.stage.contains(needle)) &&
+              (_tradeFilter == null || item.tradeType == _tradeFilter) &&
+              (_showRealized
+                  ? item.stage == 'برنده شده'
+                  : item.stage != 'برنده شده'),
         )
         .toList();
     final values = <Comparable<Object?> Function(CrmOpportunity)>[
@@ -108,10 +158,15 @@ class _OpportunitiesPageState extends State<OpportunitiesPage> {
     return ListView(
       children: [
         CrmPageHeader(
-          title: 'فرصت‌های فروش',
+          title: 'فرصت‌های خرید و فروش',
           subtitle:
               'فرصت‌ها را از تماس اولیه تا قرارداد در قیف فروش پیگیری کنید.',
           actions: [
+            OutlinedButton.icon(
+              onPressed: _printReport,
+              icon: const Icon(Icons.print_outlined),
+              label: const Text('گزارش و چاپ'),
+            ),
             FilledButton.icon(
               onPressed: _openEditor,
               icon: const Icon(Icons.add_chart_rounded),
@@ -131,6 +186,19 @@ class _OpportunitiesPageState extends State<OpportunitiesPage> {
                 value: widget.store.openOpportunities.toString(),
                 icon: Icons.track_changes_rounded,
                 color: const Color(0xff8349d6),
+              ),
+            ),
+            SizedBox(
+              width: 250,
+              child: KpiCard(
+                title: 'اهداف تحقق‌یافته',
+                value: widget.store.opportunities
+                    .where((item) => item.stage == 'برنده شده')
+                    .length
+                    .toString(),
+                icon: Icons.emoji_events_outlined,
+                color: const Color(0xff12966b),
+                onTap: () => setState(() => _showRealized = true),
               ),
             ),
             SizedBox(
@@ -155,7 +223,7 @@ class _OpportunitiesPageState extends State<OpportunitiesPage> {
         ),
         const SizedBox(height: 18),
         SectionCard(
-          title: 'نمای قیف فروش',
+          title: 'گزارش و نمودار تحلیلی قیف خرید و فروش',
           child: Wrap(
             spacing: 10,
             runSpacing: 10,
@@ -172,22 +240,61 @@ class _OpportunitiesPageState extends State<OpportunitiesPage> {
         ),
         const SizedBox(height: 18),
         SectionCard(
-          title: 'جست‌وجوی فرصت‌ها',
-          child: AutoInputDirection(
-            controller: _search,
-            child: TextField(
-              controller: _search,
-              onChanged: (_) => setState(() {}),
-              decoration: const InputDecoration(
-                prefixIcon: Icon(Icons.search_rounded),
-                hintText: 'مشتری، عنوان یا مرحله فروش',
+          title: 'جست‌وجو و نمایش اهداف',
+          child: Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            children: [
+              SizedBox(
+                width: 320,
+                child: AutoInputDirection(
+                  controller: _search,
+                  child: TextField(
+                    controller: _search,
+                    onChanged: (_) => setState(() {}),
+                    decoration: const InputDecoration(
+                      prefixIcon: Icon(Icons.search_rounded),
+                      hintText: 'مشتری، عنوان یا مرحله',
+                    ),
+                  ),
+                ),
               ),
-            ),
+              SizedBox(
+                width: 190,
+                child: DropdownButtonFormField<String?>(
+                  initialValue: _tradeFilter,
+                  decoration: const InputDecoration(labelText: 'نوع فرصت'),
+                  items: const [
+                    DropdownMenuItem<String?>(value: null, child: Text('همه')),
+                    DropdownMenuItem<String?>(
+                      value: 'خرید',
+                      child: Text('خرید'),
+                    ),
+                    DropdownMenuItem<String?>(
+                      value: 'فروش',
+                      child: Text('فروش'),
+                    ),
+                  ],
+                  onChanged: (value) => setState(() => _tradeFilter = value),
+                ),
+              ),
+              SegmentedButton<bool>(
+                segments: const [
+                  ButtonSegment(value: false, label: Text('فرصت‌های فعال')),
+                  ButtonSegment(value: true, label: Text('اهداف تحقق‌یافته')),
+                ],
+                selected: {_showRealized},
+                onSelectionChanged: (value) =>
+                    setState(() => _showRealized = value.first),
+              ),
+            ],
           ),
         ),
         const SizedBox(height: 18),
         SectionCard(
-          title: 'فرصت‌های ثبت‌شده',
+          title: _showRealized
+              ? 'فرصت‌های تحقق‌یافته (لیست اهداف)'
+              : 'فرصت‌های ثبت‌شده',
           trailing: Text('${formatPersianInteger(rows.length)} مورد'),
           child: rows.isEmpty
               ? const EmptyState(
@@ -210,6 +317,10 @@ class _OpportunitiesPageState extends State<OpportunitiesPage> {
                       DataColumn(
                         label: const Text('عنوان'),
                         onSort: (_, _) => _sort(1),
+                      ),
+                      DataColumn(
+                        label: const Text('نوع'),
+                        onSort: (_, _) => _sort(2),
                       ),
                       DataColumn(
                         label: const Text('مرحله'),
@@ -245,6 +356,7 @@ class _OpportunitiesPageState extends State<OpportunitiesPage> {
                                   ),
                                 ),
                               ),
+                              DataCell(Text(item.tradeType)),
                               DataCell(StatusPill(label: item.stage)),
                               DataCell(Text(compactMoney(item.amount))),
                               DataCell(
@@ -260,9 +372,19 @@ class _OpportunitiesPageState extends State<OpportunitiesPage> {
                                 ),
                               ),
                               DataCell(
-                                RecordActions(
-                                  onEdit: () => _openEditor(item),
-                                  onDelete: () => _delete(item),
+                                Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Checkbox(
+                                      value: item.stage == 'برنده شده',
+                                      onChanged: (value) =>
+                                          _toggleRealized(item, value ?? false),
+                                    ),
+                                    RecordActions(
+                                      onEdit: () => _openEditor(item),
+                                      onDelete: () => _delete(item),
+                                    ),
+                                  ],
                                 ),
                               ),
                             ],
@@ -294,6 +416,7 @@ class _OpportunityEditorState extends State<_OpportunityEditor> {
   final _notes = TextEditingController();
   String? _customerId;
   String _stage = 'تماس اولیه';
+  String _tradeType = 'فروش';
   double _probability = 20;
   DateTime? _expectedClose = DateTime.now().add(const Duration(days: 30));
   bool _saving = false;
@@ -308,6 +431,7 @@ class _OpportunityEditorState extends State<_OpportunityEditor> {
     _amount.text = formatPersianInteger(item.amount, grouping: true);
     _notes.text = item.notes;
     _stage = item.stage;
+    _tradeType = item.tradeType;
     _probability = item.probability.toDouble();
     _expectedClose = item.expectedClose;
   }
@@ -346,6 +470,7 @@ class _OpportunityEditorState extends State<_OpportunityEditor> {
       amount: parsePersianInt(_amount.text),
       probability: _probability.round(),
       notes: _notes.text,
+      tradeType: _tradeType,
       expectedClose: _expectedClose,
     );
     if (mounted) Navigator.of(context).pop(true);
@@ -363,7 +488,9 @@ class _OpportunityEditorState extends State<_OpportunityEditor> {
     ];
     return AlertDialog(
       title: Text(
-        widget.opportunity == null ? 'ثبت فرصت فروش' : 'ویرایش فرصت فروش',
+        widget.opportunity == null
+            ? 'ثبت فرصت خرید یا فروش'
+            : 'ویرایش فرصت خرید یا فروش',
       ),
       content: CrmDialogContent(
         maxWidth: 700,
@@ -410,6 +537,18 @@ class _OpportunityEditorState extends State<_OpportunityEditor> {
                           ? 'عنوان فرصت الزامی است.'
                           : null,
                     ),
+                  ),
+                ),
+                ResponsiveFormField(
+                  child: DropdownButtonFormField<String>(
+                    initialValue: _tradeType,
+                    decoration: const InputDecoration(labelText: 'نوع فرصت'),
+                    items: const [
+                      DropdownMenuItem(value: 'فروش', child: Text('فروش')),
+                      DropdownMenuItem(value: 'خرید', child: Text('خرید')),
+                    ],
+                    onChanged: (value) =>
+                        setState(() => _tradeType = value ?? _tradeType),
                   ),
                 ),
                 ResponsiveFormField(

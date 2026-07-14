@@ -30,4 +30,14 @@ void main() {
     expect(value.text, '۱٬۲۳۴٬۵۶۷');
     expect(parsePersianInt(value.text), 1234567);
   });
+
+  test(
+    'dashboard date includes the correct Persian weekday and Jalali date',
+    () {
+      final value = formatJalaliDateWithWeekday(DateTime(2026, 7, 14));
+
+      expect(value, startsWith('سه‌شنبه، '));
+      expect(value, contains('۱۴۰۵'));
+    },
+  );
 }

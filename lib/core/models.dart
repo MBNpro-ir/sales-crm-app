@@ -58,6 +58,10 @@ class CrmCustomer {
   final Map<String, String> details;
   final bool deleted;
 
+  String get customerCode => details['customer_code'] ?? '';
+  bool get isVip => details['is_vip'] == 'true';
+  String get displayName => company.isEmpty ? name : company;
+
   CrmCustomer copyWith({
     String? name,
     String? company,
@@ -400,6 +404,7 @@ class CrmOpportunity {
     required this.ownerName,
     required this.updatedAt,
     this.expectedClose,
+    this.tradeType = 'فروش',
     this.deleted = false,
   });
 
@@ -412,6 +417,7 @@ class CrmOpportunity {
   final int probability;
   final String notes;
   final String ownerName;
+  final String tradeType;
   final DateTime? expectedClose;
   final DateTime updatedAt;
   final bool deleted;
@@ -429,6 +435,7 @@ class CrmOpportunity {
       'probability': probability,
       'notes': notes,
       'owner_name': ownerName,
+      'trade_type': tradeType,
       'expected_close': expectedClose?.toUtc().toIso8601String(),
       'updated_at': updatedAt.toUtc().toIso8601String(),
       'deleted': deleted,
@@ -446,6 +453,9 @@ class CrmOpportunity {
       probability: _number(value['probability']),
       notes: _text(value['notes']),
       ownerName: _text(value['owner_name']),
+      tradeType: _text(value['trade_type']).isEmpty
+          ? 'فروش'
+          : _text(value['trade_type']),
       expectedClose: _nullableDate(value['expected_close']),
       updatedAt: _date(value['updated_at']),
       deleted: value['deleted'] == true || value['is_deleted'] == 1,
@@ -521,6 +531,62 @@ class CrmTask {
   }
 }
 
+class CrmDocumentLine {
+  const CrmDocumentLine({
+    required this.productCode,
+    required this.description,
+    required this.quantity,
+    required this.unit,
+    required this.unitPrice,
+    required this.discountPercent,
+    required this.taxPercent,
+  });
+
+  final String productCode;
+  final String description;
+  final int quantity;
+  final String unit;
+  final int unitPrice;
+  final int discountPercent;
+  final int taxPercent;
+
+  int get grossAmount => quantity * unitPrice;
+  int get discountAmount => (grossAmount * discountPercent / 100).round();
+  int get netAmount => grossAmount - discountAmount;
+  int get taxAmount => (netAmount * taxPercent / 100).round();
+  int get totalAmount => netAmount + taxAmount;
+
+  Map<String, dynamic> toJson() => {
+    'product_code': productCode,
+    'description': description,
+    'quantity': quantity,
+    'unit': unit,
+    'unit_price': unitPrice,
+    'discount_percent': discountPercent,
+    'tax_percent': taxPercent,
+  };
+
+  factory CrmDocumentLine.fromJson(Map<String, dynamic> value) {
+    return CrmDocumentLine(
+      productCode: _text(value['product_code']),
+      description: _text(value['description']),
+      quantity: _number(value['quantity']),
+      unit: _text(value['unit']).isEmpty ? 'عدد' : _text(value['unit']),
+      unitPrice: _number(value['unit_price']),
+      discountPercent: _number(value['discount_percent']),
+      taxPercent: _number(value['tax_percent']),
+    );
+  }
+}
+
+List<CrmDocumentLine> _documentLines(Object? value) {
+  if (value is! List) return const [];
+  return value
+      .whereType<Map>()
+      .map((item) => CrmDocumentLine.fromJson(Map<String, dynamic>.from(item)))
+      .toList();
+}
+
 class CrmQuote {
   const CrmQuote({
     required this.id,
@@ -532,6 +598,8 @@ class CrmQuote {
     required this.notes,
     required this.updatedAt,
     this.validUntil,
+    this.direction = 'فروش',
+    this.lineItems = const [],
     this.deleted = false,
   });
 
@@ -543,6 +611,8 @@ class CrmQuote {
   final int totalAmount;
   final String notes;
   final DateTime? validUntil;
+  final String direction;
+  final List<CrmDocumentLine> lineItems;
   final DateTime updatedAt;
   final bool deleted;
 
@@ -556,6 +626,8 @@ class CrmQuote {
       'total_amount': totalAmount,
       'notes': notes,
       'valid_until': validUntil?.toUtc().toIso8601String(),
+      'direction': direction,
+      'line_items': lineItems.map((item) => item.toJson()).toList(),
       'updated_at': updatedAt.toUtc().toIso8601String(),
       'deleted': deleted,
     };
@@ -571,6 +643,10 @@ class CrmQuote {
       totalAmount: _number(value['total_amount']),
       notes: _text(value['notes']),
       validUntil: _nullableDate(value['valid_until']),
+      direction: _text(value['direction']).isEmpty
+          ? 'فروش'
+          : _text(value['direction']),
+      lineItems: _documentLines(value['line_items']),
       updatedAt: _date(value['updated_at']),
       deleted: value['deleted'] == true || value['is_deleted'] == 1,
     );
@@ -589,6 +665,9 @@ class CrmOrder {
     required this.notes,
     required this.orderAt,
     required this.updatedAt,
+    this.lineItems = const [],
+    this.sourceType = '',
+    this.sourceId = '',
     this.deleted = false,
   });
 
@@ -602,6 +681,9 @@ class CrmOrder {
   final String notes;
   final DateTime orderAt;
   final DateTime updatedAt;
+  final List<CrmDocumentLine> lineItems;
+  final String sourceType;
+  final String sourceId;
   final bool deleted;
 
   Map<String, dynamic> toJson() {
@@ -615,6 +697,9 @@ class CrmOrder {
       'total_amount': totalAmount,
       'notes': notes,
       'order_at': orderAt.toUtc().toIso8601String(),
+      'line_items': lineItems.map((item) => item.toJson()).toList(),
+      'source_type': sourceType,
+      'source_id': sourceId,
       'updated_at': updatedAt.toUtc().toIso8601String(),
       'deleted': deleted,
     };
@@ -631,6 +716,9 @@ class CrmOrder {
       totalAmount: _number(value['total_amount']),
       notes: _text(value['notes']),
       orderAt: _date(value['order_at']),
+      lineItems: _documentLines(value['line_items']),
+      sourceType: _text(value['source_type']),
+      sourceId: _text(value['source_id']),
       updatedAt: _date(value['updated_at']),
       deleted: value['deleted'] == true || value['is_deleted'] == 1,
     );

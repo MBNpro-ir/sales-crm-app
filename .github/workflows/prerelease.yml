@@ -1,4 +1,4 @@
-name: Pre-release 0.0.5-alpha (Windows)
+name: Windows alpha pre-release
 
 run-name: Windows pre-release from ${{ github.ref_name }} @ ${{ github.sha }}
 
@@ -12,7 +12,7 @@ permissions:
   actions: write
 
 concurrency:
-  group: prerelease-v0.0.5-alpha
+  group: windows-alpha-prerelease
   cancel-in-progress: true
 
 jobs:
@@ -20,10 +20,26 @@ jobs:
     name: Test and build Windows app plus updater
     runs-on: windows-latest
     timeout-minutes: 55
+    outputs:
+      version: ${{ steps.release.outputs.version }}
+      build_name: ${{ steps.release.outputs.build_name }}
+      tag: ${{ steps.release.outputs.tag }}
 
     steps:
       - name: Check out source
         uses: actions/checkout@v4
+
+      - name: Read canonical release version
+        id: release
+        shell: pwsh
+        run: |
+          $release = Get-Content release-version.json -Raw | ConvertFrom-Json
+          if ($release.version -notmatch '^\d+\.\d+\.\d+-alpha$') { throw 'Invalid alpha version.' }
+          $buildName = $release.version -replace '-.*$', ''
+          $tag = "v$($release.version)"
+          "version=$($release.version)" >> $env:GITHUB_OUTPUT
+          "build_name=$buildName" >> $env:GITHUB_OUTPUT
+          "tag=$tag" >> $env:GITHUB_OUTPUT
 
       - name: Set up Flutter with SDK and Pub caching
         uses: subosito/flutter-action@v2
@@ -32,8 +48,6 @@ jobs:
           flutter-version: 3.44.6
           cache: true
           pub-cache: true
-          # These are the action's documented defaults, pinned explicitly so
-          # the existing 3.44.6 SDK and Pub caches are reused.
           cache-key: "flutter-:os:-:channel:-:version:-:arch:-:hash:"
           pub-cache-key: "flutter-pub-:os:-:channel:-:version:-:arch:-:hash:"
 
@@ -52,13 +66,14 @@ jobs:
         run: flutter test
 
       - name: Build Windows release
-        run: >-
-          flutter build windows --release
-          --build-name=0.0.5
-          --build-number=${{ github.run_number }}
-          --dart-define=APP_VERSION=0.0.5-alpha
-          --dart-define=BUILD_SHA=${{ github.sha }}
-          --dart-define=UPDATE_REPOSITORY=${{ github.repository }}
+        shell: pwsh
+        run: |
+          flutter build windows --release `
+            --build-name=${{ steps.release.outputs.build_name }} `
+            --build-number=${{ github.run_number }} `
+            --dart-define=APP_VERSION=${{ steps.release.outputs.version }} `
+            --dart-define=BUILD_SHA=${{ github.sha }} `
+            --dart-define=UPDATE_REPOSITORY=${{ github.repository }}
 
       - name: Build standalone updater
         shell: pwsh
@@ -78,11 +93,11 @@ jobs:
 
       - name: Package Windows release
         shell: pwsh
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
         run: |
-          $package = Join-Path $env:GITHUB_WORKSPACE 'sales-crm-windows-0.0.5-alpha.zip'
-          if (Test-Path -LiteralPath $package) {
-            Remove-Item -LiteralPath $package -Force
-          }
+          $package = Join-Path $env:GITHUB_WORKSPACE "sales-crm-windows-$env:VERSION.zip"
+          if (Test-Path -LiteralPath $package) { Remove-Item -LiteralPath $package -Force }
           Compress-Archive `
             -Path (Join-Path $env:GITHUB_WORKSPACE 'build\windows\x64\runner\Release\*') `
             -DestinationPath $package `
@@ -93,7 +108,7 @@ jobs:
         with:
           name: windows-release-assets
           path: |
-            sales-crm-windows-0.0.5-alpha.zip
+            sales-crm-windows-${{ steps.release.outputs.version }}.zip
             build/updater/sales_crm_updater.exe
           if-no-files-found: error
           retention-days: 14
@@ -118,7 +133,7 @@ jobs:
 
       - name: Create or move release tag
         env:
-          TAG: v0.0.5-alpha
+          TAG: ${{ needs.build-windows.outputs.tag }}
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
@@ -129,14 +144,12 @@ jobs:
       - name: Create or update pre-release
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: v0.0.5-alpha
+          TAG: ${{ needs.build-windows.outputs.tag }}
+          VERSION: ${{ needs.build-windows.outputs.version }}
           SHA: ${{ github.sha }}
           RUN_ID: ${{ github.run_id }}
           REPOSITORY: ${{ github.repository }}
         run: |
-          # upload-artifact preserves a nested path for the updater. Search the
-          # complete downloaded artifact instead of assuming both assets are at
-          # the root of dist.
           package="$(find dist -type f -name '*.zip' -print -quit)"
           updater="$(find dist -type f -name 'sales_crm_updater.exe' -print -quit)"
           test -n "$package"
@@ -146,22 +159,22 @@ jobs:
           package_name="$(basename "$package")"
           cat > dist/sales-crm-update.json <<EOF
           {
-            "version": "0.0.5-alpha",
+            "version": "$VERSION",
             "build_sha": "$SHA",
             "package_url": "https://github.com/$REPOSITORY/releases/download/$TAG/$package_name",
             "sha256": "$sha"
           }
           EOF
-          notes="Automated Windows pre-release for 0.0.5-alpha.
+          notes="Automated Windows pre-release for $VERSION.
 
           Commit: $SHA
           Workflow run: $RUN_ID
           Includes the standalone Windows updater and an update manifest."
 
           if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release edit "$TAG" --title 'Sales CRM 0.0.5-alpha' --notes "$notes" --prerelease --target "$SHA"
+            gh release edit "$TAG" --title "Sales CRM $VERSION" --notes "$notes" --prerelease --target "$SHA"
             gh release upload "$TAG" "$package" "$updater" dist/SHA256SUMS.txt dist/sales-crm-update.json --clobber
           else
             gh release create "$TAG" "$package" "$updater" dist/SHA256SUMS.txt dist/sales-crm-update.json \
-              --title 'Sales CRM 0.0.5-alpha' --notes "$notes" --prerelease --latest=false --verify-tag
+              --title "Sales CRM $VERSION" --notes "$notes" --prerelease --latest=false --verify-tag
           fi
