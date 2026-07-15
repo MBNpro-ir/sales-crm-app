@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../core/crm_store.dart';
 import '../../core/update_service.dart';
 import '../widgets/common.dart';
+import '../widgets/update_installer.dart';
 
 class SettingsPage extends StatelessWidget {
   const SettingsPage({super.key, required this.store});
@@ -145,7 +146,13 @@ class _UpdateCardState extends State<_UpdateCard> {
           ],
         ),
       );
-      if (install == true) await _updates.install(update);
+      if (install == true && mounted) {
+        await showCrmUpdateInstaller(
+          context,
+          service: _updates,
+          update: update,
+        );
+      }
     } catch (error) {
       if (mounted) {
         showCrmNotice(context, error.toString(), type: CrmNoticeType.error);
@@ -170,7 +177,7 @@ class _UpdateCardState extends State<_UpdateCard> {
           ),
           const SizedBox(height: 8),
           const Text(
-            'بستهٔ دارای SHA-256 از pre-release گیت‌هاب دریافت می‌شود و برنامهٔ جداگانهٔ updater پس از بستن CRM فایل‌ها را جایگزین می‌کند.',
+            'بسته داخل برنامه با نمایش پیشرفت دانلود و با SHA-256 بررسی می‌شود؛ سپس CRM خودکار بسته، به‌روزرسانی و دوباره اجرا می‌شود.',
           ),
           const SizedBox(height: 10),
           SwitchListTile.adaptive(

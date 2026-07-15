@@ -9,6 +9,7 @@ import 'package:windows_single_instance/windows_single_instance.dart';
 import 'core/crm_store.dart';
 import 'core/update_service.dart';
 import 'ui/app_shell.dart';
+import 'ui/widgets/update_installer.dart';
 import 'ui/desktop_window_controller.dart';
 import 'ui/login_page.dart';
 
@@ -222,7 +223,13 @@ class _UpdateCoordinatorState extends State<UpdateCoordinator> {
           ],
         ),
       );
-      if (install == true) await _updates.install(update);
+      if (install == true && mounted) {
+        await showCrmUpdateInstaller(
+          context,
+          service: _updates,
+          update: update,
+        );
+      }
     } catch (_) {
       // A failed background check must never prevent normal CRM work.
     }

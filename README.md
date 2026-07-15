@@ -18,7 +18,8 @@ Start the API and web administration panel first with the repository-root
 
 ```powershell
 $release = Get-Content .\release-version.json -Raw | ConvertFrom-Json
-flutter build windows --release --build-name=$release.build_name --dart-define=APP_VERSION=$release.version --dart-define=API_BASE_URL=https://crm-api.example.com/api/v1
+$buildName = $release.version -replace '-.*$', ''
+flutter build windows --release --build-name=$buildName --dart-define=APP_VERSION=$release.version --dart-define=API_BASE_URL=https://crm-api.example.com/api/v1
 ```
 
 `release-version.json` is the single release-version source. Change its one
@@ -30,9 +31,11 @@ title from it. The server workflow reads this same file from this repository.
 
 `.github/workflows/prerelease.yml` runs on every push to `main` (or from the
 Actions **Run workflow** button). It analyzes, tests, and builds the Windows
-application and the standalone Windows updater, then refreshes the GitHub
-pre-release tag declared in `release-version.json` with the latest ZIP, updater executable, update
-manifest, and SHA-256 checksums. It pins Flutter `3.44.6` and uses the official
+application and bundles a small PowerShell update launcher, then refreshes the
+GitHub pre-release tag declared in `release-version.json` with the latest ZIP,
+launcher, update manifest, and SHA-256 checksums. The CRM downloads the ZIP,
+shows progress, verifies it, closes, installs, and relaunches automatically. It
+pins Flutter `3.44.6` and uses the official
 Flutter Action SDK/Pub cache keys, so the existing Windows cache is restored
 until the SDK version or `pubspec.lock` changes.
 
@@ -44,4 +47,4 @@ login requires an administrator created by the server installer.
 Settings include light/dark/system mode, five accent colors, collapsible left
 navigation, text scaling, high contrast, bold text, large touch targets,
 reduced motion, and automatic update checks. The app downloads a verified
-release package only after the user confirms installation.
+release package with progress only after the user confirms installation.
