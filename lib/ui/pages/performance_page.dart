@@ -77,61 +77,90 @@ class PerformancePage extends StatelessWidget {
                   message:
                       'با ثبت فرصت و وظیفه برای کارشناسان، گزارش عملکرد ایجاد می‌شود.',
                 )
-              : CrmTableScroll(
-                  child: DataTable(
-                    headingRowColor: WidgetStatePropertyAll(
-                      Theme.of(context).colorScheme.surfaceContainerHighest,
+              : CrmConfigurableDataTable<String>(
+                  tableId: 'sales_performance',
+                  rows: owners,
+                  initialSortColumnId: 'owner',
+                  columns: [
+                    CrmTableColumn(
+                      id: 'owner',
+                      label: 'کارشناس',
+                      value: (owner) => owner,
                     ),
-                    columns: const [
-                      DataColumn(label: Text('کارشناس')),
-                      DataColumn(label: Text('فرصت‌های باز')),
-                      DataColumn(label: Text('پایپ‌لاین وزنی')),
-                      DataColumn(label: Text('وظایف باز')),
-                      DataColumn(label: Text('وظایف انجام‌شده')),
-                    ],
-                    rows: owners.map((owner) {
-                      final opportunities = store.opportunities
-                          .where((item) => item.ownerName == owner)
-                          .toList();
-                      final activeOpportunities = opportunities
+                    CrmTableColumn(
+                      id: 'open_opportunities',
+                      label: 'فرصت‌های باز',
+                      value: (owner) => store.opportunities
                           .where(
                             (item) =>
+                                item.ownerName == owner &&
                                 item.stage != 'برنده شده' &&
                                 item.stage != 'از دست رفته',
                           )
-                          .length;
-                      final weighted = opportunities.fold(
-                        0,
-                        (sum, item) => sum + item.weightedAmount,
-                      );
-                      final tasks = store.tasks
+                          .length
+                          .toString(),
+                      sortValue: (owner) => store.opportunities
+                          .where(
+                            (item) =>
+                                item.ownerName == owner &&
+                                item.stage != 'برنده شده' &&
+                                item.stage != 'از دست رفته',
+                          )
+                          .length,
+                      numeric: true,
+                    ),
+                    CrmTableColumn(
+                      id: 'weighted',
+                      label: 'پایپ‌لاین وزنی',
+                      value: (owner) => compactMoney(
+                        store.opportunities
+                            .where((item) => item.ownerName == owner)
+                            .fold<int>(
+                              0,
+                              (sum, item) => sum + item.weightedAmount,
+                            ),
+                      ),
+                      sortValue: (owner) => store.opportunities
                           .where((item) => item.ownerName == owner)
-                          .toList();
-                      return DataRow(
-                        cells: [
-                          DataCell(Text(owner)),
-                          DataCell(Text(activeOpportunities.toString())),
-                          DataCell(Text(compactMoney(weighted))),
-                          DataCell(
-                            Text(
-                              tasks
-                                  .where((item) => !item.isDone)
-                                  .length
-                                  .toString(),
-                            ),
+                          .fold<int>(
+                            0,
+                            (sum, item) => sum + item.weightedAmount,
                           ),
-                          DataCell(
-                            Text(
-                              tasks
-                                  .where((item) => item.isDone)
-                                  .length
-                                  .toString(),
-                            ),
-                          ),
-                        ],
-                      );
-                    }).toList(),
-                  ),
+                      numeric: true,
+                    ),
+                    CrmTableColumn(
+                      id: 'open_tasks',
+                      label: 'وظایف باز',
+                      value: (owner) => store.tasks
+                          .where(
+                            (item) => item.ownerName == owner && !item.isDone,
+                          )
+                          .length
+                          .toString(),
+                      sortValue: (owner) => store.tasks
+                          .where(
+                            (item) => item.ownerName == owner && !item.isDone,
+                          )
+                          .length,
+                      numeric: true,
+                    ),
+                    CrmTableColumn(
+                      id: 'done_tasks',
+                      label: 'وظایف انجام‌شده',
+                      value: (owner) => store.tasks
+                          .where(
+                            (item) => item.ownerName == owner && item.isDone,
+                          )
+                          .length
+                          .toString(),
+                      sortValue: (owner) => store.tasks
+                          .where(
+                            (item) => item.ownerName == owner && item.isDone,
+                          )
+                          .length,
+                      numeric: true,
+                    ),
+                  ],
                 ),
         ),
         const SizedBox(height: 18),

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../core/crm_store.dart';
+import '../../core/models.dart';
 import '../../core/report_service.dart';
 import '../widgets/common.dart';
 
@@ -43,7 +44,8 @@ class _ReportsPageState extends State<ReportsPage> {
           product: item.productName,
           direction: item.tradeType,
           status: item.status,
-          amount: item.amount,
+          amount: item.totalAmount,
+          date: item.callAt,
         ),
       ),
       ...store.quotes.map(
@@ -55,6 +57,7 @@ class _ReportsPageState extends State<ReportsPage> {
           direction: item.direction,
           status: item.status,
           amount: item.totalAmount,
+          date: item.updatedAt,
         ),
       ),
       ...store.orders.map(
@@ -66,6 +69,7 @@ class _ReportsPageState extends State<ReportsPage> {
           direction: item.direction,
           status: item.status,
           amount: item.totalAmount,
+          date: item.orderAt,
         ),
       ),
     ];
@@ -117,9 +121,12 @@ class _ReportsPageState extends State<ReportsPage> {
   }
 
   Future<void> _print() => CrmReportService.printTable(
+    context: context,
     title: 'گزارش جامع خرید و فروش',
     headers: _headers,
     rows: _exportRows,
+    rowDates: _reportRows.map((item) => item.date).toList(),
+    numericColumns: const {6},
   );
 
   @override
@@ -248,35 +255,50 @@ class _ReportsPageState extends State<ReportsPage> {
                   title: 'داده‌ای مطابق فیلتر نیست',
                   message: 'نام مشتری یا محصول را تغییر دهید.',
                 )
-              : CrmTableScroll(
-                  child: DataTable(
-                    columns: _headers
-                        .map((item) => DataColumn(label: Text(item)))
-                        .toList(),
-                    rows: _reportRows
-                        .map(
-                          (item) => DataRow(
-                            cells: [
-                              DataCell(Text(item.source)),
-                              DataCell(Text(item.number)),
-                              DataCell(Text(item.customer)),
-                              DataCell(
-                                SizedBox(
-                                  width: 180,
-                                  child: Text(
-                                    item.product,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                ),
-                              ),
-                              DataCell(Text(item.direction)),
-                              DataCell(StatusPill(label: item.status)),
-                              DataCell(Text(compactMoney(item.amount))),
-                            ],
-                          ),
-                        )
-                        .toList(),
-                  ),
+              : CrmConfigurableDataTable<_UnifiedReportRow>(
+                  tableId: 'unified_commercial_report',
+                  rows: _reportRows,
+                  initialSortColumnId: 'source',
+                  columns: [
+                    CrmTableColumn(
+                      id: 'source',
+                      label: 'منبع',
+                      value: (item) => item.source,
+                    ),
+                    CrmTableColumn(
+                      id: 'number',
+                      label: 'شماره',
+                      value: (item) => item.number,
+                    ),
+                    CrmTableColumn(
+                      id: 'customer',
+                      label: 'مشتری',
+                      value: (item) => item.customer,
+                    ),
+                    CrmTableColumn(
+                      id: 'product',
+                      label: 'کالا / خدمت',
+                      value: (item) => item.product,
+                    ),
+                    CrmTableColumn(
+                      id: 'direction',
+                      label: 'نوع',
+                      value: (item) => item.direction,
+                    ),
+                    CrmTableColumn(
+                      id: 'status',
+                      label: 'وضعیت',
+                      value: (item) => item.status,
+                      cell: (context, item) => StatusPill(label: item.status),
+                    ),
+                    CrmTableColumn(
+                      id: 'amount',
+                      label: 'مبلغ',
+                      value: (item) => compactMoney(item.amount),
+                      sortValue: (item) => item.amount,
+                      numeric: true,
+                    ),
+                  ],
                 ),
         ),
         const SizedBox(height: 18),
@@ -368,34 +390,55 @@ class _ReportsPageState extends State<ReportsPage> {
                     ),
                   ],
                 )
-              : CrmTableScroll(
-                  child: DataTable(
-                    headingRowColor: WidgetStatePropertyAll(
-                      Theme.of(context).colorScheme.surfaceContainerHighest,
+              : CrmConfigurableDataTable<CrmCall>(
+                  tableId: 'recent_calls_report',
+                  rows: store.calls.take(10).toList(),
+                  initialSortColumnId: 'date',
+                  initialSortAscending: false,
+                  columns: [
+                    CrmTableColumn(
+                      id: 'customer',
+                      label: 'مشتری',
+                      value: (call) => call.customerName,
                     ),
-                    columns: const [
-                      DataColumn(label: Text('مشتری')),
-                      DataColumn(label: Text('موضوع')),
-                      DataColumn(label: Text('نوع')),
-                      DataColumn(label: Text('نتیجه')),
-                      DataColumn(label: Text('خرید / فروش')),
-                      DataColumn(label: Text('مبلغ')),
-                    ],
-                    rows: store.calls.take(10).map((call) {
-                      return DataRow(
-                        cells: [
-                          DataCell(Text(call.customerName)),
-                          DataCell(Text(call.subject)),
-                          DataCell(Text(call.type)),
-                          DataCell(StatusPill(label: call.status)),
-                          DataCell(
-                            Text(call.tradeType.isEmpty ? '—' : call.tradeType),
-                          ),
-                          DataCell(Text(compactMoney(call.amount))),
-                        ],
-                      );
-                    }).toList(),
-                  ),
+                    CrmTableColumn(
+                      id: 'subject',
+                      label: 'موضوع',
+                      value: (call) => call.subject,
+                    ),
+                    CrmTableColumn(
+                      id: 'type',
+                      label: 'نوع',
+                      value: (call) => call.type,
+                    ),
+                    CrmTableColumn(
+                      id: 'result',
+                      label: 'نتیجه',
+                      value: (call) => call.status,
+                      cell: (context, call) => StatusPill(label: call.status),
+                    ),
+                    CrmTableColumn(
+                      id: 'trade',
+                      label: 'خرید / فروش',
+                      value: (call) =>
+                          call.tradeType.isEmpty ? '—' : call.tradeType,
+                    ),
+                    CrmTableColumn(
+                      id: 'amount',
+                      label: 'مبلغ',
+                      value: (call) => compactMoney(call.totalAmount),
+                      sortValue: (call) => call.totalAmount,
+                      numeric: true,
+                    ),
+                    CrmTableColumn(
+                      id: 'date',
+                      label: 'تاریخ تماس',
+                      value: (call) =>
+                          formatJalaliDate(call.callAt, includeTime: true),
+                      sortValue: (call) => call.callAt,
+                      initiallyVisible: false,
+                    ),
+                  ],
                 ),
         ),
       ],
@@ -412,6 +455,7 @@ class _UnifiedReportRow {
     required this.direction,
     required this.status,
     required this.amount,
+    required this.date,
   });
 
   final String source;
@@ -421,6 +465,7 @@ class _UnifiedReportRow {
   final String direction;
   final String status;
   final int amount;
+  final DateTime date;
 }
 
 class _Funnel extends StatelessWidget {

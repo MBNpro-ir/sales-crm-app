@@ -136,6 +136,7 @@ class _CalendarPageState extends State<CalendarPage> {
   }
 
   Future<void> _printReport() => CrmReportService.printTable(
+    context: context,
     title: 'گزارش تقویم خرید و فروش',
     headers: const ['تاریخ', 'عنوان', 'مشتری / شرح', 'نوع'],
     rows: _events
@@ -148,6 +149,7 @@ class _CalendarPageState extends State<CalendarPage> {
           ],
         )
         .toList(),
+    rowDates: _events.map((event) => event.date).toList(),
   );
 
   @override

@@ -1,8 +1,10 @@
+import 'dart:convert';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shamsi_date/shamsi_date.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../core/persian_format.dart';
 
@@ -638,6 +640,377 @@ class _CrmTableScrollState extends State<CrmTableScroll> {
         padding: const EdgeInsets.only(bottom: 10),
         child: widget.child,
       ),
+    );
+  }
+}
+
+class CrmTableColumn<T> {
+  const CrmTableColumn({
+    required this.id,
+    required this.label,
+    required this.value,
+    this.cell,
+    this.sortValue,
+    this.numeric = false,
+    this.canHide = true,
+    this.filterable = true,
+    this.initiallyVisible = true,
+  });
+
+  final String id;
+  final String label;
+  final String Function(T item) value;
+  final Widget Function(BuildContext context, T item)? cell;
+  final Object? Function(T item)? sortValue;
+  final bool numeric;
+  final bool canHide;
+  final bool filterable;
+  final bool initiallyVisible;
+}
+
+/// A reusable Windows-friendly table whose column order and visibility are
+/// persisted per table. Filtering and sorting are performed on the same source
+/// values used to render each cell, keeping every CRM list consistent.
+class CrmConfigurableDataTable<T> extends StatefulWidget {
+  const CrmConfigurableDataTable({
+    super.key,
+    required this.tableId,
+    required this.columns,
+    required this.rows,
+    this.initialSortColumnId,
+    this.initialSortAscending = true,
+    this.showToolbar = true,
+  });
+
+  final String tableId;
+  final List<CrmTableColumn<T>> columns;
+  final List<T> rows;
+  final String? initialSortColumnId;
+  final bool initialSortAscending;
+  final bool showToolbar;
+
+  @override
+  State<CrmConfigurableDataTable<T>> createState() =>
+      _CrmConfigurableDataTableState<T>();
+}
+
+class _CrmConfigurableDataTableState<T>
+    extends State<CrmConfigurableDataTable<T>> {
+  late List<String> _order;
+  late Set<String> _visible;
+  final Map<String, TextEditingController> _filters = {};
+  String? _sortColumnId;
+  late bool _sortAscending;
+
+  String get _preferenceKey => 'crm_table_layout_${widget.tableId}';
+
+  @override
+  void initState() {
+    super.initState();
+    _order = widget.columns.map((column) => column.id).toList();
+    _visible = widget.columns
+        .where((column) => column.initiallyVisible || !column.canHide)
+        .map((column) => column.id)
+        .toSet();
+    _sortColumnId = widget.initialSortColumnId;
+    _sortAscending = widget.initialSortAscending;
+    _syncFilterControllers();
+    _loadLayout();
+  }
+
+  @override
+  void didUpdateWidget(covariant CrmConfigurableDataTable<T> oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final ids = widget.columns.map((column) => column.id).toSet();
+    _order = [
+      ..._order.where(ids.contains),
+      ...widget.columns
+          .map((column) => column.id)
+          .where((id) => !_order.contains(id)),
+    ];
+    _visible.removeWhere((id) => !ids.contains(id));
+    for (final column in widget.columns.where((column) => !column.canHide)) {
+      _visible.add(column.id);
+    }
+    _syncFilterControllers();
+  }
+
+  @override
+  void dispose() {
+    for (final controller in _filters.values) {
+      controller.dispose();
+    }
+    super.dispose();
+  }
+
+  void _syncFilterControllers() {
+    final ids = widget.columns.map((column) => column.id).toSet();
+    for (final id in ids) {
+      _filters.putIfAbsent(id, TextEditingController.new);
+    }
+    final removed = _filters.keys.where((id) => !ids.contains(id)).toList();
+    for (final id in removed) {
+      _filters.remove(id)?.dispose();
+    }
+  }
+
+  Future<void> _loadLayout() async {
+    final preferences = await SharedPreferences.getInstance();
+    final raw = preferences.getString(_preferenceKey);
+    if (raw == null || !mounted) return;
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! Map) return;
+      final ids = widget.columns.map((column) => column.id).toSet();
+      final savedOrder = (decoded['order'] as List? ?? const [])
+          .map((item) => item.toString())
+          .where(ids.contains)
+          .toList();
+      final savedVisible = (decoded['visible'] as List? ?? const [])
+          .map((item) => item.toString())
+          .where(ids.contains)
+          .toSet();
+      setState(() {
+        _order = [
+          ...savedOrder,
+          ...widget.columns
+              .map((column) => column.id)
+              .where((id) => !savedOrder.contains(id)),
+        ];
+        _visible = savedVisible.isEmpty ? _visible : savedVisible;
+        for (final column in widget.columns.where(
+          (column) => !column.canHide,
+        )) {
+          _visible.add(column.id);
+        }
+      });
+    } catch (_) {
+      // Ignore an old or partially written layout and keep safe defaults.
+    }
+  }
+
+  Future<void> _saveLayout() async {
+    final preferences = await SharedPreferences.getInstance();
+    await preferences.setString(
+      _preferenceKey,
+      jsonEncode({'order': _order, 'visible': _visible.toList()}),
+    );
+  }
+
+  CrmTableColumn<T> _column(String id) =>
+      widget.columns.firstWhere((column) => column.id == id);
+
+  List<T> _filteredRows() {
+    final rows = widget.rows.where((item) {
+      for (final column in widget.columns) {
+        if (!column.filterable) continue;
+        final filter = _filters[column.id]?.text.trim().toLowerCase() ?? '';
+        if (filter.isNotEmpty &&
+            !column.value(item).toLowerCase().contains(filter)) {
+          return false;
+        }
+      }
+      return true;
+    }).toList();
+    if (_sortColumnId != null) {
+      final column = _column(_sortColumnId!);
+      rows.sort((left, right) {
+        final result = _compare(
+          column.sortValue?.call(left) ?? column.value(left),
+          column.sortValue?.call(right) ?? column.value(right),
+        );
+        return _sortAscending ? result : -result;
+      });
+    }
+    return rows;
+  }
+
+  Future<void> _configure() async {
+    var order = [..._order];
+    var visible = {..._visible};
+    final previousFilters = {
+      for (final entry in _filters.entries) entry.key: entry.value.text,
+    };
+    final applied = await showDialog<bool>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Text('تنظیم ستون‌ها و فیلتر هر ستون'),
+          content: SizedBox(
+            width: 640,
+            height: 520,
+            child: ReorderableListView.builder(
+              itemCount: order.length,
+              onReorderItem: (oldIndex, newIndex) {
+                setDialogState(() {
+                  final id = order.removeAt(oldIndex);
+                  order.insert(newIndex, id);
+                });
+              },
+              itemBuilder: (context, index) {
+                final id = order[index];
+                final column = _column(id);
+                return ListTile(
+                  key: ValueKey(id),
+                  leading: const Icon(Icons.drag_indicator_rounded),
+                  title: Text(column.label),
+                  subtitle: column.filterable
+                      ? TextField(
+                          controller: _filters[id],
+                          decoration: const InputDecoration(
+                            isDense: true,
+                            labelText: 'فیلتر این ستون',
+                          ),
+                        )
+                      : null,
+                  trailing: Switch(
+                    value: visible.contains(id),
+                    onChanged: !column.canHide
+                        ? null
+                        : (value) => setDialogState(() {
+                            if (value) {
+                              visible.add(id);
+                            } else if (visible.length > 1) {
+                              visible.remove(id);
+                            }
+                          }),
+                  ),
+                );
+              },
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                for (final controller in _filters.values) {
+                  controller.clear();
+                }
+                setDialogState(() {
+                  order = widget.columns.map((column) => column.id).toList();
+                  visible = widget.columns
+                      .where(
+                        (column) => column.initiallyVisible || !column.canHide,
+                      )
+                      .map((column) => column.id)
+                      .toSet();
+                });
+              },
+              child: const Text('بازنشانی'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('انصراف'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('اعمال'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (applied == true) {
+      setState(() {
+        _order = order;
+        _visible = visible;
+      });
+      await _saveLayout();
+    } else {
+      for (final entry in previousFilters.entries) {
+        _filters[entry.key]?.text = entry.value;
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final columns = _order.where(_visible.contains).map(_column).toList();
+    final rows = _filteredRows();
+    final sortIndex = _sortColumnId == null
+        ? null
+        : columns.indexWhere((column) => column.id == _sortColumnId);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (widget.showToolbar) ...[
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              OutlinedButton.icon(
+                onPressed: _configure,
+                icon: const Icon(Icons.view_column_outlined),
+                label: const Text('ستون‌ها، ترتیب و فیلتر'),
+              ),
+              if (_filters.values.any(
+                (controller) => controller.text.isNotEmpty,
+              ))
+                TextButton.icon(
+                  onPressed: () => setState(() {
+                    for (final controller in _filters.values) {
+                      controller.clear();
+                    }
+                  }),
+                  icon: const Icon(Icons.filter_alt_off_outlined),
+                  label: const Text('پاک‌کردن فیلتر ستون‌ها'),
+                ),
+              Text(
+                '${formatPersianInteger(rows.length)} ردیف نمایشی',
+                style: Theme.of(context).textTheme.labelLarge,
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+        ],
+        CrmTableScroll(
+          child: DataTable(
+            headingRowColor: WidgetStatePropertyAll(
+              Theme.of(context).colorScheme.surfaceContainerHighest,
+            ),
+            sortColumnIndex: sortIndex != null && sortIndex >= 0
+                ? sortIndex
+                : null,
+            sortAscending: _sortAscending,
+            columns: columns
+                .map(
+                  (column) => DataColumn(
+                    label: Text(column.label),
+                    numeric: column.numeric,
+                    onSort: column.sortValue == null && !column.filterable
+                        ? null
+                        : (_, ascending) => setState(() {
+                            _sortColumnId = column.id;
+                            _sortAscending = ascending;
+                          }),
+                  ),
+                )
+                .toList(),
+            rows: rows
+                .map(
+                  (item) => DataRow(
+                    cells: columns
+                        .map(
+                          (column) => DataCell(
+                            column.cell?.call(context, item) ??
+                                Text(column.value(item)),
+                          ),
+                        )
+                        .toList(),
+                  ),
+                )
+                .toList(),
+          ),
+        ),
+      ],
+    );
+  }
+
+  static int _compare(Object? left, Object? right) {
+    if (left is num && right is num) return left.compareTo(right);
+    if (left is DateTime && right is DateTime) return left.compareTo(right);
+    return left.toString().toLowerCase().compareTo(
+      right.toString().toLowerCase(),
     );
   }
 }

@@ -4,12 +4,41 @@ import '../../core/crm_store.dart';
 import '../../core/models.dart';
 import '../../core/report_service.dart';
 import '../widgets/common.dart';
+import 'documents_page.dart';
+
+Future<bool?> showCrmCallEditor(
+  BuildContext context, {
+  required CrmStore store,
+  CrmCall? call,
+  String? initialCustomerId,
+  VoidCallback? onOpenProducts,
+}) {
+  return showDialog<bool>(
+    context: context,
+    builder: (context) => _CallEditorDialog(
+      store: store,
+      call: call,
+      initialCustomerId: initialCustomerId,
+      onOpenProducts: onOpenProducts,
+    ),
+  );
+}
 
 class CallsPage extends StatefulWidget {
-  const CallsPage({super.key, required this.store, this.initialStatus});
+  const CallsPage({
+    super.key,
+    required this.store,
+    this.initialStatus,
+    this.initialCustomerId,
+    this.openEditorOnStart = false,
+    this.onOpenProducts,
+  });
 
   final CrmStore store;
   final String? initialStatus;
+  final String? initialCustomerId;
+  final bool openEditorOnStart;
+  final VoidCallback? onOpenProducts;
 
   @override
   State<CallsPage> createState() => _CallsPageState();
@@ -17,8 +46,6 @@ class CallsPage extends StatefulWidget {
 
 class _CallsPageState extends State<CallsPage> {
   final _search = TextEditingController();
-  int _sortColumn = 7;
-  bool _sortAscending = false;
   String? _resultFilter;
   String? _typeFilter;
   String? _tradeFilter;
@@ -31,6 +58,11 @@ class _CallsPageState extends State<CallsPage> {
   void initState() {
     super.initState();
     _resultFilter = widget.initialStatus;
+    if (widget.openEditorOnStart) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _openEditor(null, widget.initialCustomerId);
+      });
+    }
   }
 
   @override
@@ -48,13 +80,12 @@ class _CallsPageState extends State<CallsPage> {
       );
       return;
     }
-    final saved = await showDialog<bool>(
-      context: context,
-      builder: (context) => _CallEditorDialog(
-        store: widget.store,
-        call: call,
-        initialCustomerId: customerId,
-      ),
+    final saved = await showCrmCallEditor(
+      context,
+      store: widget.store,
+      call: call,
+      initialCustomerId: customerId,
+      onOpenProducts: widget.onOpenProducts,
     );
     if (!mounted || saved != true) return;
     showCrmNotice(
@@ -76,17 +107,6 @@ class _CallsPageState extends State<CallsPage> {
     }
   }
 
-  void _sort(int column) {
-    setState(() {
-      if (_sortColumn == column) {
-        _sortAscending = !_sortAscending;
-      } else {
-        _sortColumn = column;
-        _sortAscending = true;
-      }
-    });
-  }
-
   CrmCustomer? _customerFor(CrmCall call) => widget.store.customers
       .cast<CrmCustomer?>()
       .firstWhere((item) => item?.id == call.customerId, orElse: () => null);
@@ -103,41 +123,190 @@ class _CallsPageState extends State<CallsPage> {
     }).toList();
   }
 
-  Future<void> _printCalls({bool todayOnly = false}) {
-    final today = DateTime.now();
-    final calls = _filteredCalls().where(
-      (item) =>
-          !todayOnly ||
-          (item.callAt.year == today.year &&
-              item.callAt.month == today.month &&
-              item.callAt.day == today.day),
-    );
+  static const _excelHeaders = [
+    'شناسه',
+    'کد مشتری',
+    'مشتری',
+    'موضوع تماس',
+    'نوع تماس',
+    'جهت تماس',
+    'نتیجه',
+    'خرید / فروش',
+    'کالا / خدمت',
+    'تعداد / تناژ',
+    'فی',
+    'مبلغ پایه',
+    'تخفیف ریالی',
+    'ارزش افزوده (درصد)',
+    'ارزش افزوده (ریال)',
+    'جمع کل',
+    'مدت (دقیقه)',
+    'تاریخ و زمان',
+    'استان',
+    'شهر',
+    'شرح',
+  ];
+
+  List<List<Object?>> _rowsForCalls(List<CrmCall> calls) =>
+      calls.asMap().entries.map((entry) {
+        final item = entry.value;
+        final customer = _customerFor(item);
+        return <Object?>[
+          item.id,
+          customer?.customerCode ?? '',
+          item.customerName,
+          item.subject,
+          item.type,
+          item.direction,
+          item.status,
+          item.tradeType,
+          item.productName,
+          item.quantity,
+          item.unitPrice,
+          item.subtotal,
+          item.discountAmount,
+          item.taxPercent,
+          item.taxAmount,
+          item.totalAmount,
+          item.durationMinutes,
+          item.callAt.toUtc().toIso8601String(),
+          customer?.province ?? '',
+          customer?.city ?? '',
+          item.notes,
+        ];
+      }).toList();
+
+  Future<void> _printCalls() {
+    final calls = _filteredCalls();
+    final rows = calls.asMap().entries.map((entry) {
+      final item = entry.value;
+      final customer = _customerFor(item);
+      return <Object?>[
+        entry.key + 1,
+        item.customerName,
+        item.subject,
+        item.type,
+        item.status,
+        item.hasTradeOutcome ? r'$' : '',
+        item.tradeType,
+        item.productName,
+        customer?.province ?? '',
+        customer?.city ?? '',
+        item.subtotal,
+        item.discountAmount,
+        item.taxAmount,
+        item.totalAmount,
+        formatJalaliDate(item.callAt, includeTime: true),
+      ];
+    }).toList();
     return CrmReportService.printTable(
-      title: todayOnly ? 'گزارش روزانه مدیر' : 'گزارش تماس‌ها و جلسات',
-      subtitle: todayOnly ? 'تاریخ: ${compactDate(today)}' : '',
+      context: context,
+      title: 'گزارش تماس‌ها و جلسات',
+      subtitle:
+          'گزارش عملکرد قابل تنظیم بر اساس بازه تاریخ، مشتری، کالا، شهر و استان',
       headers: const [
+        'ردیف',
         'مشتری',
         'موضوع',
         'نوع',
         'نتیجه',
+        'معامله',
         'خرید/فروش',
-        'تاریخ',
-        'مبلغ',
+        'کالا / خدمت',
+        'استان',
+        'شهر',
+        'مبلغ پایه',
+        'تخفیف',
+        'ارزش افزوده',
+        'جمع کل',
+        'تاریخ و زمان',
       ],
-      rows: calls
-          .map(
-            (item) => <Object?>[
-              item.customerName,
-              item.subject,
-              item.type,
-              item.status,
-              item.tradeType,
-              compactDate(item.callAt),
-              formatPersianInteger(item.amount),
-            ],
-          )
-          .toList(),
+      rows: rows,
+      rowDates: calls.map((item) => item.callAt).toList(),
+      numericColumns: const {10, 11, 12, 13},
     );
+  }
+
+  Future<void> _exportExcel() async {
+    final path = await CrmReportService.exportExcel(
+      suggestedName: 'calls.xlsx',
+      sheetName: 'تماس‌ها',
+      headers: _excelHeaders,
+      rows: _rowsForCalls(_filteredCalls()),
+    );
+    if (mounted && path != null) {
+      showCrmNotice(
+        context,
+        'خروجی اکسل تماس‌ها ذخیره شد.',
+        type: CrmNoticeType.success,
+      );
+    }
+  }
+
+  Future<void> _importExcel() async {
+    final table = await CrmReportService.pickExcelRows();
+    if (table == null || table.isEmpty) return;
+    const aliases = <String, String>{
+      'شناسه': 'id',
+      'کد مشتری': 'customer_code',
+      'مشتری': 'customer_name',
+      'موضوع تماس': 'subject',
+      'نوع تماس': 'type',
+      'جهت تماس': 'direction',
+      'نتیجه': 'status',
+      'خرید / فروش': 'trade_type',
+      'کالا / خدمت': 'product_name',
+      'تعداد / تناژ': 'quantity',
+      'فی': 'unit_price',
+      'مبلغ پایه': 'amount',
+      'تخفیف ریالی': 'discount_amount',
+      'ارزش افزوده (درصد)': 'tax_percent',
+      'مدت (دقیقه)': 'duration_minutes',
+      'تاریخ و زمان': 'call_at',
+      'شرح': 'notes',
+    };
+    final headers = table.first.map((item) => aliases[item] ?? '').toList();
+    final records = <Map<String, String>>[];
+    for (final row in table.skip(1)) {
+      final record = <String, String>{};
+      for (
+        var index = 0;
+        index < headers.length && index < row.length;
+        index++
+      ) {
+        if (headers[index].isNotEmpty) record[headers[index]] = row[index];
+      }
+      records.add(record);
+    }
+    final count = await widget.store.importCallRows(records);
+    if (mounted) {
+      showCrmNotice(
+        context,
+        '${formatPersianInteger(count)} تماس از اکسل ثبت یا به‌روزرسانی شد.',
+        type: count == 0 ? CrmNoticeType.warning : CrmNoticeType.success,
+      );
+    }
+  }
+
+  Future<void> _newDocument(CrmCall call, DocumentPageMode mode) async {
+    final saved = await showDialog<bool>(
+      context: context,
+      builder: (context) => DocumentEditorDialog(
+        store: widget.store,
+        mode: mode,
+        initialCustomerId: call.customerId,
+        initialDirection: call.tradeType == 'خرید' ? 'خرید' : 'فروش',
+      ),
+    );
+    if (mounted && saved == true) {
+      showCrmNotice(
+        context,
+        mode == DocumentPageMode.quote
+            ? 'پیش‌فاکتور از روی تماس ثبت شد.'
+            : 'سفارش از روی تماس ثبت شد.',
+        type: CrmNoticeType.success,
+      );
+    }
   }
 
   List<CrmCall> _filteredCalls() {
@@ -163,24 +332,6 @@ class _CallsPageState extends State<CallsPage> {
   Widget build(BuildContext context) {
     final store = widget.store;
     final rows = _filteredCalls();
-    final values = <Comparable<Object?> Function(CrmCall)>[
-      (item) => item.customerName,
-      (item) => item.subject,
-      (item) => item.type,
-      (item) => item.status,
-      (item) => item.tradeType,
-      (item) => item.productName,
-      (item) => item.quantity,
-      (item) => item.callAt,
-      (item) => item.durationMinutes,
-      (item) => item.amount,
-    ];
-    rows.sort((left, right) {
-      final result = values[_sortColumn](
-        left,
-      ).compareTo(values[_sortColumn](right));
-      return _sortAscending ? result : -result;
-    });
     final failed = store.calls.where((call) => call.status == 'ناموفق').length;
     return ListView(
       children: [
@@ -188,10 +339,26 @@ class _CallsPageState extends State<CallsPage> {
           title: 'مدیریت تماس‌ها',
           subtitle: 'تماس‌ها، نتیجه، مبلغ احتمالی و پیگیری بعدی را ثبت کنید.',
           actions: [
-            OutlinedButton.icon(
-              onPressed: () => _printCalls(todayOnly: true),
-              icon: const Icon(Icons.assignment_outlined),
-              label: const Text('کارتابل روزانه مدیر'),
+            PopupMenuButton<String>(
+              tooltip: 'ورود و خروج اکسل',
+              onSelected: (value) {
+                if (value == 'import') _importExcel();
+                if (value == 'export') _exportExcel();
+              },
+              itemBuilder: (context) => const [
+                PopupMenuItem(
+                  value: 'import',
+                  child: Text('ورود اطلاعات از اکسل'),
+                ),
+                PopupMenuItem(value: 'export', child: Text('خروجی از اکسل')),
+              ],
+              child: IgnorePointer(
+                child: OutlinedButton.icon(
+                  onPressed: () {},
+                  icon: const Icon(Icons.table_view_outlined),
+                  label: const Text('ابزار اکسل'),
+                ),
+              ),
             ),
             OutlinedButton.icon(
               onPressed: _printCalls,
@@ -350,7 +517,7 @@ class _CallsPageState extends State<CallsPage> {
               _filter(
                 'اولویت مشتری',
                 _priorityFilter,
-                const ['خیلی بالا', 'بالا', 'متوسط', 'پایین'],
+                store.customerPriorities,
                 (value) => setState(() => _priorityFilter = value),
               ),
               _filter(
@@ -383,127 +550,150 @@ class _CallsPageState extends State<CallsPage> {
                   message:
                       'عبارت جست‌وجو را تغییر دهید یا تماس جدیدی ثبت کنید.',
                 )
-              : CrmTableScroll(
-                  child: DataTable(
-                    headingRowColor: WidgetStatePropertyAll(
-                      Theme.of(context).colorScheme.surfaceContainerHighest,
+              : CrmConfigurableDataTable<CrmCall>(
+                  tableId: 'calls',
+                  rows: rows,
+                  initialSortColumnId: 'date_time',
+                  initialSortAscending: false,
+                  columns: [
+                    CrmTableColumn(
+                      id: 'row',
+                      label: 'ردیف',
+                      value: (item) =>
+                          formatPersianInteger(rows.indexOf(item) + 1),
+                      numeric: true,
                     ),
-                    sortColumnIndex: _sortColumn,
-                    sortAscending: _sortAscending,
-                    columns: [
-                      DataColumn(
-                        label: const Text('مشتری'),
-                        onSort: (_, _) => _sort(0),
+                    CrmTableColumn(
+                      id: 'customer',
+                      label: 'مشتری',
+                      value: (item) => item.customerName,
+                    ),
+                    CrmTableColumn(
+                      id: 'subject',
+                      label: 'موضوع تماس',
+                      value: (item) => item.subject,
+                    ),
+                    CrmTableColumn(
+                      id: 'type',
+                      label: 'نوع',
+                      value: (item) => item.type,
+                    ),
+                    CrmTableColumn(
+                      id: 'result',
+                      label: 'نتیجه',
+                      value: (item) => item.status,
+                      cell: (context, item) => StatusPill(label: item.status),
+                    ),
+                    CrmTableColumn(
+                      id: 'outcome',
+                      label: 'معامله',
+                      value: (item) => item.hasTradeOutcome ? 'دلار' : '',
+                      cell: (context, item) => Icon(
+                        item.hasTradeOutcome
+                            ? Icons.attach_money_rounded
+                            : Icons.remove,
+                        color: item.hasTradeOutcome
+                            ? const Color(0xff12966b)
+                            : null,
                       ),
-                      DataColumn(
-                        label: const Text('موضوع تماس'),
-                        onSort: (_, _) => _sort(1),
-                      ),
-                      DataColumn(
-                        label: const Text('نوع'),
-                        onSort: (_, _) => _sort(2),
-                      ),
-                      DataColumn(
-                        label: const Text('نتیجه'),
-                        onSort: (_, _) => _sort(3),
-                      ),
-                      DataColumn(
-                        label: const Text('خرید / فروش'),
-                        onSort: (_, _) => _sort(4),
-                      ),
-                      DataColumn(
-                        label: const Text('کالا'),
-                        onSort: (_, _) => _sort(5),
-                      ),
-                      DataColumn(
-                        label: const Text('تعداد / تناژ'),
-                        numeric: true,
-                        onSort: (_, _) => _sort(6),
-                      ),
-                      DataColumn(
-                        label: const Text('تاریخ'),
-                        onSort: (_, _) => _sort(7),
-                      ),
-                      DataColumn(
-                        label: const Text('مدت'),
-                        numeric: true,
-                        onSort: (_, _) => _sort(8),
-                      ),
-                      DataColumn(
-                        label: const Text('مبلغ احتمالی (ریال)'),
-                        numeric: true,
-                        onSort: (_, _) => _sort(9),
-                      ),
-                      const DataColumn(label: Text('عملیات')),
-                    ],
-                    rows: rows
-                        .map(
-                          (call) => DataRow(
-                            cells: [
-                              DataCell(
-                                SizedBox(
-                                  width: 175,
-                                  child: Text(
-                                    call.customerName,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                ),
-                              ),
-                              DataCell(
-                                SizedBox(
-                                  width: 180,
-                                  child: Text(
-                                    call.subject,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                ),
-                              ),
-                              DataCell(Text(call.type)),
-                              DataCell(StatusPill(label: call.status)),
-                              DataCell(
-                                Text(
-                                  call.tradeType.isEmpty ? '—' : call.tradeType,
-                                ),
-                              ),
-                              DataCell(
-                                SizedBox(
-                                  width: 130,
-                                  child: Text(
-                                    call.productName.isEmpty
-                                        ? '—'
-                                        : call.productName,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                ),
-                              ),
-                              DataCell(
-                                Text(
-                                  call.quantity == 0
-                                      ? '—'
-                                      : formatPersianInteger(
-                                          call.quantity,
-                                          grouping: false,
-                                        ),
-                                ),
-                              ),
-                              DataCell(Text(compactDate(call.callAt))),
-                              DataCell(
-                                Text(
-                                  '${formatPersianInteger(call.durationMinutes)} دقیقه',
-                                ),
-                              ),
-                              DataCell(Text(compactMoney(call.amount))),
-                              DataCell(
-                                RecordActions(
-                                  onEdit: () => _openEditor(call),
-                                  onDelete: () => _delete(call),
-                                ),
-                              ),
-                            ],
+                    ),
+                    CrmTableColumn(
+                      id: 'trade',
+                      label: 'خرید / فروش',
+                      value: (item) =>
+                          item.tradeType.isEmpty ? '—' : item.tradeType,
+                    ),
+                    CrmTableColumn(
+                      id: 'product',
+                      label: 'کالا / خدمت',
+                      value: (item) =>
+                          item.productName.isEmpty ? '—' : item.productName,
+                    ),
+                    CrmTableColumn(
+                      id: 'quantity',
+                      label: 'تعداد / تناژ',
+                      value: (item) => item.quantity == 0
+                          ? '—'
+                          : formatPersianInteger(item.quantity),
+                      sortValue: (item) => item.quantity,
+                      numeric: true,
+                    ),
+                    CrmTableColumn(
+                      id: 'date_time',
+                      label: 'تاریخ و زمان تماس',
+                      value: (item) =>
+                          formatJalaliDate(item.callAt, includeTime: true),
+                      sortValue: (item) => item.callAt,
+                    ),
+                    CrmTableColumn(
+                      id: 'duration',
+                      label: 'مدت',
+                      value: (item) =>
+                          '${formatPersianInteger(item.durationMinutes)} دقیقه',
+                      sortValue: (item) => item.durationMinutes,
+                      numeric: true,
+                    ),
+                    CrmTableColumn(
+                      id: 'subtotal',
+                      label: 'مبلغ پایه',
+                      value: (item) => compactMoney(item.subtotal),
+                      sortValue: (item) => item.subtotal,
+                      numeric: true,
+                    ),
+                    CrmTableColumn(
+                      id: 'discount',
+                      label: 'تخفیف',
+                      value: (item) => compactMoney(item.discountAmount),
+                      sortValue: (item) => item.discountAmount,
+                      numeric: true,
+                      initiallyVisible: false,
+                    ),
+                    CrmTableColumn(
+                      id: 'tax',
+                      label: 'ارزش افزوده',
+                      value: (item) => compactMoney(item.taxAmount),
+                      sortValue: (item) => item.taxAmount,
+                      numeric: true,
+                      initiallyVisible: false,
+                    ),
+                    CrmTableColumn(
+                      id: 'total',
+                      label: 'جمع کل',
+                      value: (item) => compactMoney(item.totalAmount),
+                      sortValue: (item) => item.totalAmount,
+                      numeric: true,
+                    ),
+                    CrmTableColumn(
+                      id: 'actions',
+                      label: 'عملیات',
+                      value: (_) => '',
+                      filterable: false,
+                      canHide: false,
+                      cell: (context, call) => PopupMenuButton<String>(
+                        tooltip: 'عملیات تماس',
+                        onSelected: (value) {
+                          if (value == 'edit') _openEditor(call);
+                          if (value == 'quote') {
+                            _newDocument(call, DocumentPageMode.quote);
+                          }
+                          if (value == 'order') {
+                            _newDocument(call, DocumentPageMode.order);
+                          }
+                          if (value == 'delete') _delete(call);
+                        },
+                        itemBuilder: (context) => const [
+                          PopupMenuItem(value: 'edit', child: Text('ویرایش')),
+                          PopupMenuItem(
+                            value: 'quote',
+                            child: Text('پیش‌فاکتور'),
                           ),
-                        )
-                        .toList(),
-                  ),
+                          PopupMenuItem(value: 'order', child: Text('سفارش')),
+                          PopupMenuDivider(),
+                          PopupMenuItem(value: 'delete', child: Text('حذف')),
+                        ],
+                      ),
+                    ),
+                  ],
                 ),
         ),
       ],
@@ -568,11 +758,13 @@ class _CallEditorDialog extends StatefulWidget {
     required this.store,
     this.call,
     this.initialCustomerId,
+    this.onOpenProducts,
   });
 
   final CrmStore store;
   final CrmCall? call;
   final String? initialCustomerId;
+  final VoidCallback? onOpenProducts;
 
   @override
   State<_CallEditorDialog> createState() => _CallEditorDialogState();
@@ -584,14 +776,16 @@ class _CallEditorDialogState extends State<_CallEditorDialog> {
   final _notes = TextEditingController();
   final _duration = TextEditingController(text: '۵');
   final _amount = TextEditingController(text: '۰');
-  final _product = TextEditingController();
   final _quantity = TextEditingController(text: '۰');
   final _unitPrice = TextEditingController(text: '۰');
+  final _discount = TextEditingController(text: '۰');
+  final _taxPercent = TextEditingController(text: '۱۰');
   String? _customerId;
+  String _productName = '';
   String _type = 'تلفنی';
   String _direction = 'خروجی';
   String _status = 'موفق';
-  String _tradeType = 'فروش';
+  String _tradeType = 'بدون معامله';
   bool _addFollowUp = true;
   DateTime? _nextFollowUp = DateTime.now().add(const Duration(days: 1));
   bool _saving = false;
@@ -609,9 +803,11 @@ class _CallEditorDialogState extends State<_CallEditorDialog> {
     _notes.text = call.notes;
     _duration.text = formatPersianInteger(call.durationMinutes);
     _amount.text = formatPersianInteger(call.amount, grouping: true);
-    _product.text = call.productName;
+    _productName = call.productName;
     _quantity.text = formatPersianInteger(call.quantity);
     _unitPrice.text = formatPersianInteger(call.unitPrice, grouping: true);
+    _discount.text = formatPersianInteger(call.discountAmount, grouping: true);
+    _taxPercent.text = formatPersianInteger(call.taxPercent);
     _type = call.type;
     _direction = call.direction;
     _status = call.status;
@@ -626,9 +822,10 @@ class _CallEditorDialogState extends State<_CallEditorDialog> {
     _notes.dispose();
     _duration.dispose();
     _amount.dispose();
-    _product.dispose();
     _quantity.dispose();
     _unitPrice.dispose();
+    _discount.dispose();
+    _taxPercent.dispose();
     super.dispose();
   }
 
@@ -644,12 +841,27 @@ class _CallEditorDialogState extends State<_CallEditorDialog> {
     }
   }
 
+  int get _calculatedSubtotal {
+    final quantity = parsePersianInt(_quantity.text);
+    final unitPrice = parsePersianInt(_unitPrice.text);
+    if (quantity > 0 && unitPrice > 0) return quantity * unitPrice;
+    return parsePersianInt(_amount.text);
+  }
+
+  int get _netAmount => (_calculatedSubtotal - parsePersianInt(_discount.text))
+      .clamp(0, 1 << 62)
+      .toInt();
+  int get _taxAmount =>
+      (_netAmount * parsePersianInt(_taxPercent.text) / 100).round();
+  int get _totalAmount => _netAmount + _taxAmount;
+
   Future<void> _save() async {
     if (!_formKey.currentState!.validate()) return;
     final customer = widget.store.customers.firstWhere(
       (item) => item.id == _customerId,
     );
     setState(() => _saving = true);
+    final calculatedSubtotal = _calculatedSubtotal;
     await widget.store.saveCall(
       customer: customer,
       subject: _subject.text,
@@ -658,11 +870,13 @@ class _CallEditorDialogState extends State<_CallEditorDialog> {
       status: _status,
       notes: _notes.text,
       durationMinutes: parsePersianInt(_duration.text),
-      amount: parsePersianInt(_amount.text),
+      amount: calculatedSubtotal,
       tradeType: _tradeType,
-      productName: _product.text,
+      productName: _productName,
       quantity: parsePersianInt(_quantity.text),
       unitPrice: parsePersianInt(_unitPrice.text),
+      discountAmount: parsePersianInt(_discount.text),
+      taxPercent: parsePersianInt(_taxPercent.text),
       nextFollowUp: _addFollowUp ? _nextFollowUp : null,
       id: widget.call?.id,
       callAt: widget.call?.callAt,
@@ -752,7 +966,7 @@ class _CallEditorDialogState extends State<_CallEditorDialog> {
                 ResponsiveFormField(
                   child: _numberField(
                     _amount,
-                    'مبلغ احتمالی (ریال)',
+                    'مبلغ پایه / احتمالی (ریال)',
                     required: true,
                     rial: true,
                   ),
@@ -765,15 +979,48 @@ class _CallEditorDialogState extends State<_CallEditorDialog> {
                   ], (value) => _tradeType = value),
                 ),
                 ResponsiveFormField(
-                  child: AutoInputDirection(
-                    controller: _product,
-                    child: TextFormField(
-                      controller: _product,
-                      inputFormatters: [textOnlyFormatter],
-                      decoration: const InputDecoration(
-                        labelText: 'کالا / خدمت',
+                  child: DropdownButtonFormField<String>(
+                    initialValue: _productName.isEmpty ? null : _productName,
+                    isExpanded: true,
+                    decoration: InputDecoration(
+                      labelText: 'کالا / خدمت',
+                      suffixIcon: IconButton(
+                        tooltip: 'افزودن در کالا و موجودی',
+                        onPressed: widget.onOpenProducts == null
+                            ? null
+                            : () {
+                                Navigator.pop(context, false);
+                                widget.onOpenProducts!.call();
+                              },
+                        icon: const Icon(Icons.add_box_outlined),
                       ),
                     ),
+                    items:
+                        {
+                              ...widget.store.products
+                                  .where((item) => item.isActive)
+                                  .map((item) => item.name),
+                              if (_productName.isNotEmpty) _productName,
+                            }
+                            .map(
+                              (name) => DropdownMenuItem(
+                                value: name,
+                                child: Text(name),
+                              ),
+                            )
+                            .toList(),
+                    onChanged: (value) => setState(() {
+                      _productName = value ?? '';
+                      final matches = widget.store.products
+                          .where((item) => item.name == value)
+                          .toList();
+                      if (matches.isNotEmpty) {
+                        _unitPrice.text = formatPersianInteger(
+                          matches.first.unitPrice,
+                          grouping: true,
+                        );
+                      }
+                    }),
                   ),
                 ),
                 ResponsiveFormField(
@@ -781,6 +1028,36 @@ class _CallEditorDialogState extends State<_CallEditorDialog> {
                 ),
                 ResponsiveFormField(
                   child: _numberField(_unitPrice, 'فی (ریال)', rial: true),
+                ),
+                ResponsiveFormField(
+                  child: _numberField(_discount, 'تخفیف (ریالی)', rial: true),
+                ),
+                ResponsiveFormField(
+                  child: _numberField(_taxPercent, 'ارزش افزوده (درصد)'),
+                ),
+                ResponsiveFormField.full(
+                  child: Container(
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: Theme.of(
+                        context,
+                      ).colorScheme.primaryContainer.withValues(alpha: 0.42),
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: Wrap(
+                      spacing: 22,
+                      runSpacing: 8,
+                      children: [
+                        Text('مبلغ پایه: ${compactMoney(_calculatedSubtotal)}'),
+                        Text('خالص: ${compactMoney(_netAmount)}'),
+                        Text('ارزش افزوده: ${compactMoney(_taxAmount)}'),
+                        Text(
+                          'جمع کل: ${compactMoney(_totalAmount)}',
+                          style: const TextStyle(fontWeight: FontWeight.w900),
+                        ),
+                      ],
+                    ),
+                  ),
                 ),
                 ResponsiveFormField.full(
                   child: AutoInputDirection(
@@ -883,6 +1160,7 @@ class _CallEditorDialogState extends State<_CallEditorDialog> {
             ? const [persianRialFormatter]
             : const [persianNumberFormatter],
         decoration: InputDecoration(labelText: label),
+        onChanged: (_) => setState(() {}),
         validator: required
             ? (value) => value == null || value.trim().isEmpty
                   ? 'مبلغ را وارد کنید.'

@@ -64,12 +64,16 @@ class _AppShellState extends State<AppShell> {
           },
         );
       case 1:
-        return CustomersPage(store: widget.store);
+        return CustomersPage(
+          store: widget.store,
+          onOpenProducts: () => _selectPage(10),
+        );
       case 2:
         return CallsPage(
           key: ValueKey(_initialCallStatus),
           store: widget.store,
           initialStatus: _initialCallStatus,
+          onOpenProducts: () => _selectPage(10),
         );
       case 3:
         return OpportunitiesPage(store: widget.store);

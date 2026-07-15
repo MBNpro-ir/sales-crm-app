@@ -105,6 +105,7 @@ class _DocumentsPageState extends State<DocumentsPage> {
   }
 
   Future<void> _printQuote(CrmQuote item) => CrmReportService.printDocument(
+    context: context,
     title: 'پیش‌فاکتور ${item.direction}',
     number: item.quoteNumber,
     customer: item.customerName,
@@ -116,6 +117,7 @@ class _DocumentsPageState extends State<DocumentsPage> {
   );
 
   Future<void> _printOrder(CrmOrder item) => CrmReportService.printDocument(
+    context: context,
     title: 'سفارش ${item.direction}',
     number: item.orderNumber,
     customer: item.customerName,
@@ -127,8 +129,10 @@ class _DocumentsPageState extends State<DocumentsPage> {
   );
 
   Future<void> _printReport() {
+    final quotes = _filteredQuotes();
+    final orders = _filteredOrders();
     final rows = _isQuote
-        ? _filteredQuotes()
+        ? quotes
               .map(
                 (item) => <Object?>[
                   item.quoteNumber,
@@ -141,7 +145,7 @@ class _DocumentsPageState extends State<DocumentsPage> {
                 ],
               )
               .toList()
-        : _filteredOrders()
+        : orders
               .map(
                 (item) => <Object?>[
                   item.orderNumber,
@@ -155,6 +159,7 @@ class _DocumentsPageState extends State<DocumentsPage> {
               )
               .toList();
     return CrmReportService.printTable(
+      context: context,
       title: 'گزارش $_title',
       headers: const [
         'شماره',
@@ -166,6 +171,10 @@ class _DocumentsPageState extends State<DocumentsPage> {
         'تاریخ',
       ],
       rows: rows,
+      rowDates: _isQuote
+          ? quotes.map((item) => item.validUntil ?? item.updatedAt).toList()
+          : orders.map((item) => item.orderAt).toList(),
+      numericColumns: const {4, 5},
     );
   }
 
@@ -386,45 +395,72 @@ class _DocumentsPageState extends State<DocumentsPage> {
         message: 'فیلتر را تغییر دهید یا پیش‌فاکتور جدید ثبت کنید.',
       );
     }
-    return CrmTableScroll(
-      child: DataTable(
-        columns: const [
-          DataColumn(label: Text('شماره')),
-          DataColumn(label: Text('مشتری')),
-          DataColumn(label: Text('نوع')),
-          DataColumn(label: Text('وضعیت')),
-          DataColumn(label: Text('ردیف کالا')),
-          DataColumn(label: Text('ارزش افزوده')),
-          DataColumn(label: Text('مبلغ کل')),
-          DataColumn(label: Text('عملیات')),
-        ],
-        rows: items.map((item) {
-          final tax = item.lineItems.fold<int>(
-            0,
-            (sum, line) => sum + line.taxAmount,
-          );
-          return DataRow(
-            cells: [
-              DataCell(Text(item.quoteNumber)),
-              DataCell(Text(item.customerName)),
-              DataCell(Text(item.direction)),
-              DataCell(StatusPill(label: item.status)),
-              DataCell(Text(formatPersianInteger(item.lineItems.length))),
-              DataCell(Text(compactMoney(tax))),
-              DataCell(Text(compactMoney(item.totalAmount))),
-              DataCell(
-                _QuoteActions(
-                  item: item,
-                  onEdit: () => _openEditor(quote: item),
-                  onDelete: () => _deleteQuote(item),
-                  onPrint: () => _printQuote(item),
-                  onStatus: (value) => _setQuoteStatus(item, value),
-                ),
-              ),
-            ],
-          );
-        }).toList(),
-      ),
+    return CrmConfigurableDataTable<CrmQuote>(
+      tableId: 'quotes',
+      rows: items,
+      initialSortColumnId: 'number',
+      initialSortAscending: false,
+      columns: [
+        CrmTableColumn(
+          id: 'number',
+          label: 'شماره',
+          value: (item) => item.quoteNumber,
+        ),
+        CrmTableColumn(
+          id: 'customer',
+          label: 'مشتری',
+          value: (item) => item.customerName,
+        ),
+        CrmTableColumn(
+          id: 'direction',
+          label: 'نوع',
+          value: (item) => item.direction,
+        ),
+        CrmTableColumn(
+          id: 'status',
+          label: 'وضعیت',
+          value: (item) => item.status,
+          cell: (context, item) => StatusPill(label: item.status),
+        ),
+        CrmTableColumn(
+          id: 'lines',
+          label: 'ردیف کالا',
+          value: (item) => formatPersianInteger(item.lineItems.length),
+          sortValue: (item) => item.lineItems.length,
+          numeric: true,
+        ),
+        CrmTableColumn(
+          id: 'tax',
+          label: 'ارزش افزوده',
+          value: (item) => compactMoney(
+            item.lineItems.fold<int>(0, (sum, line) => sum + line.taxAmount),
+          ),
+          sortValue: (item) =>
+              item.lineItems.fold<int>(0, (sum, line) => sum + line.taxAmount),
+          numeric: true,
+        ),
+        CrmTableColumn(
+          id: 'total',
+          label: 'مبلغ کل',
+          value: (item) => compactMoney(item.totalAmount),
+          sortValue: (item) => item.totalAmount,
+          numeric: true,
+        ),
+        CrmTableColumn(
+          id: 'actions',
+          label: 'عملیات',
+          value: (_) => '',
+          canHide: false,
+          filterable: false,
+          cell: (context, item) => _QuoteActions(
+            item: item,
+            onEdit: () => _openEditor(quote: item),
+            onDelete: () => _deleteQuote(item),
+            onPrint: () => _printQuote(item),
+            onStatus: (value) => _setQuoteStatus(item, value),
+          ),
+        ),
+      ],
     );
   }
 
@@ -436,43 +472,68 @@ class _DocumentsPageState extends State<DocumentsPage> {
         message: 'فیلتر را تغییر دهید یا سفارش جدید ثبت کنید.',
       );
     }
-    return CrmTableScroll(
-      child: DataTable(
-        columns: const [
-          DataColumn(label: Text('شماره')),
-          DataColumn(label: Text('طرف حساب')),
-          DataColumn(label: Text('نوع')),
-          DataColumn(label: Text('وضعیت')),
-          DataColumn(label: Text('ردیف کالا')),
-          DataColumn(label: Text('تاریخ')),
-          DataColumn(label: Text('مبلغ کل')),
-          DataColumn(label: Text('عملیات')),
-        ],
-        rows: items
-            .map(
-              (item) => DataRow(
-                cells: [
-                  DataCell(Text(item.orderNumber)),
-                  DataCell(Text(item.customerName)),
-                  DataCell(Text(item.direction)),
-                  DataCell(StatusPill(label: item.status)),
-                  DataCell(Text(formatPersianInteger(item.lineItems.length))),
-                  DataCell(Text(compactDate(item.orderAt))),
-                  DataCell(Text(compactMoney(item.totalAmount))),
-                  DataCell(
-                    _OrderActions(
-                      item: item,
-                      onEdit: () => _openEditor(order: item),
-                      onDelete: () => _deleteOrder(item),
-                      onPrint: () => _printOrder(item),
-                      onStatus: (value) => _setOrderStatus(item, value),
-                    ),
-                  ),
-                ],
-              ),
-            )
-            .toList(),
-      ),
+    return CrmConfigurableDataTable<CrmOrder>(
+      tableId: 'orders',
+      rows: items,
+      initialSortColumnId: 'date',
+      initialSortAscending: false,
+      columns: [
+        CrmTableColumn(
+          id: 'number',
+          label: 'شماره',
+          value: (item) => item.orderNumber,
+        ),
+        CrmTableColumn(
+          id: 'customer',
+          label: 'طرف حساب',
+          value: (item) => item.customerName,
+        ),
+        CrmTableColumn(
+          id: 'direction',
+          label: 'نوع',
+          value: (item) => item.direction,
+        ),
+        CrmTableColumn(
+          id: 'status',
+          label: 'وضعیت',
+          value: (item) => item.status,
+          cell: (context, item) => StatusPill(label: item.status),
+        ),
+        CrmTableColumn(
+          id: 'lines',
+          label: 'ردیف کالا',
+          value: (item) => formatPersianInteger(item.lineItems.length),
+          sortValue: (item) => item.lineItems.length,
+          numeric: true,
+        ),
+        CrmTableColumn(
+          id: 'date',
+          label: 'تاریخ',
+          value: (item) => compactDate(item.orderAt),
+          sortValue: (item) => item.orderAt,
+        ),
+        CrmTableColumn(
+          id: 'total',
+          label: 'مبلغ کل',
+          value: (item) => compactMoney(item.totalAmount),
+          sortValue: (item) => item.totalAmount,
+          numeric: true,
+        ),
+        CrmTableColumn(
+          id: 'actions',
+          label: 'عملیات',
+          value: (_) => '',
+          canHide: false,
+          filterable: false,
+          cell: (context, item) => _OrderActions(
+            item: item,
+            onEdit: () => _openEditor(order: item),
+            onDelete: () => _deleteOrder(item),
+            onPrint: () => _printOrder(item),
+            onStatus: (value) => _setOrderStatus(item, value),
+          ),
+        ),
+      ],
     );
   }
 }
@@ -561,6 +622,7 @@ class DocumentEditorDialog extends StatefulWidget {
     this.order,
     this.initialDirection,
     this.initialStatus,
+    this.initialCustomerId,
   });
 
   final CrmStore store;
@@ -569,6 +631,7 @@ class DocumentEditorDialog extends StatefulWidget {
   final CrmOrder? order;
   final String? initialDirection;
   final String? initialStatus;
+  final String? initialCustomerId;
 
   @override
   State<DocumentEditorDialog> createState() => _DocumentEditorState();
@@ -593,6 +656,7 @@ class _DocumentEditorState extends State<DocumentEditorDialog> {
     final quote = widget.quote;
     final order = widget.order;
     _direction = widget.initialDirection ?? 'فروش';
+    _customerId = widget.initialCustomerId;
     _status =
         widget.initialStatus ?? (_isQuote ? 'پیش‌نویس' : 'در انتظار تایید');
     if (quote != null) {

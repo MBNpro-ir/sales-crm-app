@@ -58,6 +58,7 @@ class _TasksPageState extends State<TasksPage> {
   }
 
   Future<void> _printReport() => CrmReportService.printTable(
+    context: context,
     title: 'گزارش پیگیری و وظایف',
     headers: const [
       'عنوان',
@@ -81,6 +82,7 @@ class _TasksPageState extends State<TasksPage> {
           ],
         )
         .toList(),
+    rowDates: widget.store.tasks.map((item) => item.dueAt).toList(),
   );
 
   @override

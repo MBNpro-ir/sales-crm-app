@@ -23,7 +23,7 @@ class LocalDatabase {
     final location = join(await getDatabasesPath(), 'sales_crm.sqlite');
     _database = await openDatabase(
       location,
-      version: 4,
+      version: 5,
       onCreate: (database, version) async {
         await _createCoreTables(database);
         await _createRecordTable(database);
@@ -49,6 +49,14 @@ class LocalDatabase {
           );
           await database.execute(
             'ALTER TABLE calls ADD COLUMN unit_price INTEGER NOT NULL DEFAULT 0',
+          );
+        }
+        if (oldVersion < 5) {
+          await database.execute(
+            'ALTER TABLE calls ADD COLUMN discount_amount INTEGER NOT NULL DEFAULT 0',
+          );
+          await database.execute(
+            'ALTER TABLE calls ADD COLUMN tax_percent INTEGER NOT NULL DEFAULT 0',
           );
         }
       },
@@ -92,6 +100,8 @@ class LocalDatabase {
         product_name TEXT NOT NULL DEFAULT '',
         quantity INTEGER NOT NULL DEFAULT 0,
         unit_price INTEGER NOT NULL DEFAULT 0,
+        discount_amount INTEGER NOT NULL DEFAULT 0,
+        tax_percent INTEGER NOT NULL DEFAULT 0,
         next_follow_up TEXT,
         updated_at TEXT NOT NULL,
         is_deleted INTEGER NOT NULL DEFAULT 0
@@ -174,6 +184,66 @@ class LocalDatabase {
       await transaction.delete('crm_records');
       await transaction.delete('outbox');
       await transaction.delete('metadata');
+    });
+  }
+
+  Future<Map<String, dynamic>> exportWorkspaceBackup() async {
+    final database = await _db;
+    return {
+      'format': 'sales-crm-backup',
+      'version': 1,
+      'created_at': DateTime.now().toUtc().toIso8601String(),
+      'customers': await database.query('customers'),
+      'calls': await database.query('calls'),
+      'records': await database.query('crm_records'),
+      'outbox': await database.query('outbox'),
+      'metadata': await database.query('metadata'),
+    };
+  }
+
+  Future<void> restoreWorkspaceBackup(Map<String, dynamic> backup) async {
+    if (backup['format'] != 'sales-crm-backup' || backup['version'] != 1) {
+      throw const FormatException('فایل پشتیبان معتبر نیست.');
+    }
+    final database = await _db;
+    List<Map<String, Object?>> rows(String key) {
+      final value = backup[key];
+      if (value is! List) throw FormatException('بخش $key در فایل وجود ندارد.');
+      return value
+          .whereType<Map>()
+          .map(
+            (row) =>
+                row.map((column, item) => MapEntry(column.toString(), item)),
+          )
+          .toList();
+    }
+
+    final customers = rows('customers');
+    final calls = rows('calls');
+    final records = rows('records');
+    final outbox = rows('outbox');
+    final metadata = rows('metadata');
+    await database.transaction((transaction) async {
+      await transaction.delete('customers');
+      await transaction.delete('calls');
+      await transaction.delete('crm_records');
+      await transaction.delete('outbox');
+      await transaction.delete('metadata');
+      for (final row in customers) {
+        await transaction.insert('customers', row);
+      }
+      for (final row in calls) {
+        await transaction.insert('calls', row);
+      }
+      for (final row in records) {
+        await transaction.insert('crm_records', row);
+      }
+      for (final row in outbox) {
+        await transaction.insert('outbox', row);
+      }
+      for (final row in metadata) {
+        await transaction.insert('metadata', row);
+      }
     });
   }
 

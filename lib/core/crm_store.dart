@@ -7,6 +7,7 @@ import 'package:uuid/uuid.dart';
 import 'api_client.dart';
 import 'local_database.dart';
 import 'models.dart';
+import 'persian_format.dart';
 
 enum CrmAccent { ocean, emerald, violet, amber, rose }
 
@@ -54,6 +55,12 @@ class CrmStore extends ChangeNotifier {
     'سایر',
   ];
   List<String> _customerStatuses = const ['فعال', 'مشتری بالقوه', 'غیرفعال'];
+  List<String> _customerPriorities = const [
+    'خیلی بالا',
+    'بالا',
+    'متوسط',
+    'پایین',
+  ];
   List<String> _productCategories = const [
     'صنایع شیمیایی',
     'ضایعات',
@@ -93,6 +100,7 @@ class CrmStore extends ChangeNotifier {
   List<CrmOrder> get orders => List.unmodifiable(_orders);
   List<String> get activityTypes => List.unmodifiable(_activityTypes);
   List<String> get customerStatuses => List.unmodifiable(_customerStatuses);
+  List<String> get customerPriorities => List.unmodifiable(_customerPriorities);
   List<String> get productCategories => List.unmodifiable(_productCategories);
   bool get busy => _busy;
   bool get syncing => _syncing;
@@ -117,10 +125,10 @@ class CrmStore extends ChangeNotifier {
       _calls.where((call) => call.status == 'ناموفق').length;
   int get totalRevenue => _calls
       .where((call) => call.tradeType != 'خرید')
-      .fold(0, (sum, call) => sum + call.amount);
+      .fold(0, (sum, call) => sum + call.totalAmount);
   int get totalPurchase => _calls
       .where((call) => call.tradeType == 'خرید')
-      .fold(0, (sum, call) => sum + call.amount);
+      .fold(0, (sum, call) => sum + call.totalAmount);
   int get openOpportunities => _opportunities
       .where(
         (opportunity) =>
@@ -181,17 +189,15 @@ class CrmStore extends ChangeNotifier {
     _userName = _preferences!.getString('user_name') ?? _userName;
     _organizationName =
         _preferences!.getString('organization_name') ?? _organizationName;
-    _activityTypes = _mergeOptions(
-      _activityTypes,
-      _preferences!.getStringList('activity_types') ?? const [],
+    _activityTypes = _savedOptions('activity_types', _activityTypes);
+    _customerStatuses = _savedOptions('customer_statuses', _customerStatuses);
+    _customerPriorities = _savedOptions(
+      'customer_priorities',
+      _customerPriorities,
     );
-    _customerStatuses = _mergeOptions(
-      _customerStatuses,
-      _preferences!.getStringList('customer_statuses') ?? const [],
-    );
-    _productCategories = _mergeOptions(
+    _productCategories = _savedOptions(
+      'product_categories',
       _productCategories,
-      _preferences!.getStringList('product_categories') ?? const [],
     );
     await _database.initialize();
     await _database.removeLegacyDemoData();
@@ -292,11 +298,15 @@ class CrmStore extends ChangeNotifier {
     notifyListeners();
   }
 
-  List<String> _mergeOptions(List<String> defaults, List<String> saved) {
-    return {
-      ...defaults,
-      ...saved.map((item) => item.trim()),
-    }.where((item) => item.isNotEmpty).toList();
+  List<String> _savedOptions(String key, List<String> defaults) {
+    final saved = _preferences?.getStringList(key);
+    if (saved == null) return [...defaults];
+    final normalized = saved
+        .map((item) => item.trim())
+        .where((item) => item.isNotEmpty)
+        .toSet()
+        .toList();
+    return normalized.isEmpty ? [...defaults] : normalized;
   }
 
   Future<void> addActivityType(String value) async {
@@ -313,6 +323,159 @@ class CrmStore extends ChangeNotifier {
     _customerStatuses = [..._customerStatuses, item];
     await _preferences?.setStringList('customer_statuses', _customerStatuses);
     notifyListeners();
+  }
+
+  Future<void> addCustomerPriority(String value) async {
+    final item = value.trim();
+    if (item.isEmpty || _customerPriorities.contains(item)) return;
+    _customerPriorities = [..._customerPriorities, item];
+    await _preferences?.setStringList(
+      'customer_priorities',
+      _customerPriorities,
+    );
+    notifyListeners();
+  }
+
+  Future<void> renameActivityType(String oldValue, String newValue) =>
+      _renameCustomerOption(
+        key: 'activity_types',
+        oldValue: oldValue,
+        newValue: newValue,
+        options: _activityTypes,
+        updateOptions: (value) => _activityTypes = value,
+        updateCustomer: (customer, value) =>
+            customer.copyWith(activityType: value),
+      );
+
+  Future<void> renameCustomerStatus(String oldValue, String newValue) =>
+      _renameCustomerOption(
+        key: 'customer_statuses',
+        oldValue: oldValue,
+        newValue: newValue,
+        options: _customerStatuses,
+        updateOptions: (value) => _customerStatuses = value,
+        updateCustomer: (customer, value) => customer.copyWith(status: value),
+      );
+
+  Future<void> renameCustomerPriority(String oldValue, String newValue) =>
+      _renameCustomerOption(
+        key: 'customer_priorities',
+        oldValue: oldValue,
+        newValue: newValue,
+        options: _customerPriorities,
+        updateOptions: (value) => _customerPriorities = value,
+        updateCustomer: (customer, value) => customer.copyWith(priority: value),
+      );
+
+  Future<void> _renameCustomerOption({
+    required String key,
+    required String oldValue,
+    required String newValue,
+    required List<String> options,
+    required ValueChanged<List<String>> updateOptions,
+    required CrmCustomer Function(CrmCustomer, String) updateCustomer,
+  }) async {
+    final normalized = newValue.trim();
+    if (normalized.isEmpty ||
+        (normalized != oldValue && options.contains(normalized))) {
+      return;
+    }
+    updateOptions([
+      for (final option in options) option == oldValue ? normalized : option,
+    ]);
+    await _preferences?.setStringList(key, switch (key) {
+      'activity_types' => _activityTypes,
+      'customer_statuses' => _customerStatuses,
+      _ => _customerPriorities,
+    });
+    var changed = false;
+    for (final customer in _customers.where(
+      (item) => switch (key) {
+        'activity_types' => item.activityType == oldValue,
+        'customer_statuses' => item.status == oldValue,
+        _ => item.priority == oldValue,
+      },
+    )) {
+      await _database.saveCustomer(
+        updateCustomer(
+          customer,
+          normalized,
+        ).copyWith(updatedAt: DateTime.now()),
+      );
+      changed = true;
+    }
+    if (changed) {
+      await _afterLocalMutation();
+    } else {
+      notifyListeners();
+    }
+  }
+
+  Future<void> removeActivityType(String value) => _removeOption(
+    key: 'activity_types',
+    value: value,
+    options: _activityTypes,
+    updateOptions: (items) => _activityTypes = items,
+    updateCustomer: (customer, replacement) =>
+        customer.copyWith(activityType: replacement),
+  );
+
+  Future<void> removeCustomerStatus(String value) => _removeOption(
+    key: 'customer_statuses',
+    value: value,
+    options: _customerStatuses,
+    updateOptions: (items) => _customerStatuses = items,
+    updateCustomer: (customer, replacement) =>
+        customer.copyWith(status: replacement),
+  );
+
+  Future<void> removeCustomerPriority(String value) => _removeOption(
+    key: 'customer_priorities',
+    value: value,
+    options: _customerPriorities,
+    updateOptions: (items) => _customerPriorities = items,
+    updateCustomer: (customer, replacement) =>
+        customer.copyWith(priority: replacement),
+  );
+
+  Future<void> _removeOption({
+    required String key,
+    required String value,
+    required List<String> options,
+    required ValueChanged<List<String>> updateOptions,
+    required CrmCustomer Function(CrmCustomer, String) updateCustomer,
+  }) async {
+    if (options.length <= 1) return;
+    final remaining = options.where((item) => item != value).toList();
+    if (remaining.length == options.length) return;
+    final replacement = remaining.first;
+    updateOptions(remaining);
+    await _preferences?.setStringList(key, switch (key) {
+      'activity_types' => _activityTypes,
+      'customer_statuses' => _customerStatuses,
+      _ => _customerPriorities,
+    });
+    var changed = false;
+    for (final customer in _customers.where(
+      (item) => switch (key) {
+        'activity_types' => item.activityType == value,
+        'customer_statuses' => item.status == value,
+        _ => item.priority == value,
+      },
+    )) {
+      await _database.saveCustomer(
+        updateCustomer(
+          customer,
+          replacement,
+        ).copyWith(updatedAt: DateTime.now()),
+      );
+      changed = true;
+    }
+    if (changed) {
+      await _afterLocalMutation();
+    } else {
+      notifyListeners();
+    }
   }
 
   Future<void> addProductCategory(String value) async {
@@ -520,6 +683,72 @@ class CrmStore extends ChangeNotifier {
     return imported;
   }
 
+  Future<int> importCallRows(List<Map<String, String>> rows) async {
+    var imported = 0;
+    for (final row in rows) {
+      final customerCode = (row['customer_code'] ?? '').trim();
+      final customerName = (row['customer_name'] ?? '').trim().toLowerCase();
+      final customer = _customers.cast<CrmCustomer?>().firstWhere(
+        (item) =>
+            item != null &&
+            ((customerCode.isNotEmpty && item.customerCode == customerCode) ||
+                (customerName.isNotEmpty &&
+                    item.displayName.toLowerCase() == customerName)),
+        orElse: () => null,
+      );
+      if (customer == null) continue;
+      final subject = (row['subject'] ?? '').trim();
+      if (subject.isEmpty) continue;
+      final rawDate = (row['call_at'] ?? '').trim();
+      final callAt = DateTime.tryParse(rawDate)?.toLocal() ?? DateTime.now();
+      await _database.saveCall(
+        CrmCall(
+          id: (row['id'] ?? '').trim().isEmpty
+              ? _uuid.v4()
+              : (row['id'] ?? '').trim(),
+          customerId: customer.id,
+          customerName: customer.displayName,
+          subject: subject,
+          type: (row['type'] ?? '').trim().isEmpty
+              ? 'تلفنی'
+              : (row['type'] ?? '').trim(),
+          direction: (row['direction'] ?? '').trim().isEmpty
+              ? 'خروجی'
+              : (row['direction'] ?? '').trim(),
+          status: (row['status'] ?? '').trim().isEmpty
+              ? 'پیگیری'
+              : (row['status'] ?? '').trim(),
+          notes: (row['notes'] ?? '').trim(),
+          callAt: callAt,
+          durationMinutes: parsePersianInt(row['duration_minutes'] ?? ''),
+          amount: parsePersianInt(row['amount'] ?? ''),
+          tradeType: (row['trade_type'] ?? '').trim(),
+          productName: (row['product_name'] ?? '').trim(),
+          quantity: parsePersianInt(row['quantity'] ?? ''),
+          unitPrice: parsePersianInt(row['unit_price'] ?? ''),
+          discountAmount: parsePersianInt(row['discount_amount'] ?? ''),
+          taxPercent: parsePersianInt(row['tax_percent'] ?? ''),
+          nextFollowUp: DateTime.tryParse(
+            (row['next_follow_up'] ?? '').trim(),
+          )?.toLocal(),
+          updatedAt: DateTime.now(),
+        ),
+      );
+      imported++;
+    }
+    if (imported > 0) await _afterLocalMutation();
+    return imported;
+  }
+
+  Future<Map<String, dynamic>> createWorkspaceBackup() =>
+      _database.exportWorkspaceBackup();
+
+  Future<void> restoreWorkspaceBackup(Map<String, dynamic> backup) async {
+    await _database.restoreWorkspaceBackup(backup);
+    await refresh();
+    if (_online && hasSession) await sync(silent: true);
+  }
+
   Future<void> saveCall({
     required CrmCustomer customer,
     required String subject,
@@ -534,6 +763,8 @@ class CrmStore extends ChangeNotifier {
     String productName = '',
     int quantity = 0,
     int unitPrice = 0,
+    int discountAmount = 0,
+    int taxPercent = 0,
     String? id,
     DateTime? callAt,
   }) async {
@@ -554,6 +785,8 @@ class CrmStore extends ChangeNotifier {
       productName: productName.trim(),
       quantity: quantity,
       unitPrice: unitPrice,
+      discountAmount: discountAmount,
+      taxPercent: taxPercent,
       nextFollowUp: nextFollowUp,
       updatedAt: now,
     );
@@ -598,6 +831,9 @@ class CrmStore extends ChangeNotifier {
     required int probability,
     required String notes,
     String tradeType = 'فروش',
+    String productName = '',
+    String province = '',
+    String city = '',
     DateTime? expectedClose,
     String? id,
   }) async {
@@ -612,6 +848,9 @@ class CrmStore extends ChangeNotifier {
       notes: notes.trim(),
       ownerName: _userName,
       tradeType: tradeType,
+      productName: productName.trim(),
+      province: province.trim(),
+      city: city.trim(),
       expectedClose: expectedClose,
       updatedAt: DateTime.now(),
     );
@@ -752,6 +991,8 @@ class CrmStore extends ChangeNotifier {
         productName: item.productName,
         quantity: item.quantity,
         unitPrice: item.unitPrice,
+        discountAmount: item.discountAmount,
+        taxPercent: item.taxPercent,
         updatedAt: DateTime.now(),
         deleted: true,
       ),
@@ -792,6 +1033,9 @@ class CrmStore extends ChangeNotifier {
         notes: item.notes,
         ownerName: item.ownerName,
         tradeType: item.tradeType,
+        productName: item.productName,
+        province: item.province,
+        city: item.city,
         expectedClose: item.expectedClose,
         updatedAt: DateTime.now(),
         deleted: true,

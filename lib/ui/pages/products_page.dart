@@ -16,8 +16,6 @@ class ProductsPage extends StatefulWidget {
 
 class _ProductsPageState extends State<ProductsPage> {
   final _search = TextEditingController();
-  int _sortColumn = 0;
-  bool _sortAscending = true;
 
   @override
   void dispose() {
@@ -51,17 +49,6 @@ class _ProductsPageState extends State<ProductsPage> {
     }
   }
 
-  void _sort(int column) {
-    setState(() {
-      if (_sortColumn == column) {
-        _sortAscending = !_sortAscending;
-      } else {
-        _sortColumn = column;
-        _sortAscending = true;
-      }
-    });
-  }
-
   Future<void> _addCategory() async {
     final controller = TextEditingController();
     final value = await showDialog<String>(
@@ -92,6 +79,7 @@ class _ProductsPageState extends State<ProductsPage> {
   }
 
   Future<void> _printReport() => CrmReportService.printTable(
+    context: context,
     title: 'گزارش کالا و موجودی بر اساس گروه',
     headers: const [
       'گروه',
@@ -115,6 +103,7 @@ class _ProductsPageState extends State<ProductsPage> {
           ],
         )
         .toList(),
+    numericColumns: const {4, 5},
   );
 
   @override
@@ -126,20 +115,6 @@ class _ProductsPageState extends State<ProductsPage> {
           item.sku.toLowerCase().contains(needle) ||
           item.category.toLowerCase().contains(needle);
     }).toList();
-    final values = <Comparable<Object?> Function(CrmProduct)>[
-      (item) => item.name,
-      (item) => item.sku,
-      (item) => item.category,
-      (item) => item.unitPrice,
-      (item) => item.stock,
-      (item) => item.isActive ? 1 : 0,
-    ];
-    products.sort((left, right) {
-      final result = values[_sortColumn](
-        left,
-      ).compareTo(values[_sortColumn](right));
-      return _sortAscending ? result : -result;
-    });
     final lowStock = widget.store.products
         .where((product) => product.needsRestock)
         .toList();
@@ -280,85 +255,74 @@ class _ProductsPageState extends State<ProductsPage> {
                   message:
                       'محصول جدیدی ثبت کنید یا عبارت جست‌وجو را تغییر دهید.',
                 )
-              : CrmTableScroll(
-                  child: DataTable(
-                    headingRowColor: WidgetStatePropertyAll(
-                      Theme.of(context).colorScheme.surfaceContainerHighest,
+              : CrmConfigurableDataTable<CrmProduct>(
+                  tableId: 'products',
+                  rows: products,
+                  initialSortColumnId: 'name',
+                  columns: [
+                    CrmTableColumn(
+                      id: 'name',
+                      label: 'محصول',
+                      value: (product) => product.name,
                     ),
-                    sortColumnIndex: _sortColumn,
-                    sortAscending: _sortAscending,
-                    columns: [
-                      DataColumn(
-                        label: const Text('محصول'),
-                        onSort: (_, _) => _sort(0),
+                    CrmTableColumn(
+                      id: 'sku',
+                      label: 'کد',
+                      value: (product) => product.sku,
+                    ),
+                    CrmTableColumn(
+                      id: 'category',
+                      label: 'دسته',
+                      value: (product) => product.category,
+                    ),
+                    CrmTableColumn(
+                      id: 'unit',
+                      label: 'واحد',
+                      value: (product) => product.unit,
+                    ),
+                    CrmTableColumn(
+                      id: 'price',
+                      label: 'قیمت پایه (ریال)',
+                      value: (product) => compactMoney(product.unitPrice),
+                      sortValue: (product) => product.unitPrice,
+                      numeric: true,
+                    ),
+                    CrmTableColumn(
+                      id: 'stock',
+                      label: 'موجودی',
+                      value: (product) =>
+                          '${formatPersianInteger(product.stock)} / حداقل ${formatPersianInteger(product.minStock)}',
+                      sortValue: (product) => product.stock,
+                      numeric: true,
+                    ),
+                    CrmTableColumn(
+                      id: 'status',
+                      label: 'وضعیت',
+                      value: (product) => product.needsRestock
+                          ? 'موجودی کم'
+                          : product.isActive
+                          ? 'فعال'
+                          : 'غیر فعال',
+                      cell: (context, product) => StatusPill(
+                        label: product.needsRestock
+                            ? 'موجودی کم'
+                            : product.isActive
+                            ? 'فعال'
+                            : 'غیر فعال',
                       ),
-                      DataColumn(
-                        label: const Text('کد'),
-                        onSort: (_, _) => _sort(1),
+                    ),
+                    CrmTableColumn(
+                      id: 'actions',
+                      label: 'عملیات',
+                      value: (_) => '',
+                      canHide: false,
+                      filterable: false,
+                      cell: (context, product) => RecordActions(
+                        onEdit: () => _openEditor(product),
+                        onDelete: () => _delete(product),
                       ),
-                      DataColumn(
-                        label: const Text('دسته'),
-                        onSort: (_, _) => _sort(2),
-                      ),
-                      const DataColumn(label: Text('واحد')),
-                      DataColumn(
-                        label: const Text('قیمت پایه (ریال)'),
-                        numeric: true,
-                        onSort: (_, _) => _sort(3),
-                      ),
-                      DataColumn(
-                        label: const Text('موجودی'),
-                        numeric: true,
-                        onSort: (_, _) => _sort(4),
-                      ),
-                      DataColumn(
-                        label: const Text('وضعیت'),
-                        onSort: (_, _) => _sort(5),
-                      ),
-                      const DataColumn(label: Text('عملیات')),
-                    ],
-                    rows: products
-                        .map(
-                          (product) => DataRow(
-                            cells: [
-                              DataCell(
-                                SizedBox(
-                                  width: 190,
-                                  child: Text(
-                                    product.name,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                ),
-                              ),
-                              DataCell(Text(product.sku)),
-                              DataCell(Text(product.category)),
-                              DataCell(Text(product.unit)),
-                              DataCell(Text(compactMoney(product.unitPrice))),
-                              DataCell(
-                                Text(
-                                  '${formatPersianInteger(product.stock)} / حداقل ${formatPersianInteger(product.minStock)}',
-                                ),
-                              ),
-                              DataCell(
-                                product.needsRestock
-                                    ? const StatusPill(label: 'موجودی کم')
-                                    : StatusPill(
-                                        label: product.isActive
-                                            ? 'فعال'
-                                            : 'غیر فعال',
-                                      ),
-                              ),
-                              DataCell(
-                                RecordActions(
-                                  onEdit: () => _openEditor(product),
-                                  onDelete: () => _delete(product),
-                                ),
-                              ),
-                            ],
-                          ),
-                        )
-                        .toList(),
-                  ),
+                    ),
+                  ],
                 ),
         ),
       ],

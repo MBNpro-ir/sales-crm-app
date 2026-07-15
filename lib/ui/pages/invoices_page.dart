@@ -145,6 +145,7 @@ class _InvoicesPageState extends State<InvoicesPage> {
   }
 
   Future<void> _print(_InvoiceEntry entry) => CrmReportService.printDocument(
+    context: context,
     title: 'فاکتور ${widget.direction}',
     number: entry.number,
     customer: entry.customer,
@@ -156,6 +157,7 @@ class _InvoicesPageState extends State<InvoicesPage> {
   );
 
   Future<void> _printReport() => CrmReportService.printTable(
+    context: context,
     title: 'گزارش فاکتورهای ${widget.direction}',
     headers: const ['منبع', 'شماره', 'طرف حساب', 'وضعیت', 'ردیف', 'مبلغ کل'],
     rows: _entries
@@ -170,6 +172,8 @@ class _InvoicesPageState extends State<InvoicesPage> {
           ],
         )
         .toList(),
+    rowDates: _entries.map((item) => item.updatedAt).toList(),
+    numericColumns: const {4, 5},
   );
 
   @override
@@ -274,56 +278,83 @@ class _InvoicesPageState extends State<InvoicesPage> {
                   message:
                       'یک پیش‌فاکتور یا سفارش را تایید کنید، یا فاکتور مستقیم بسازید.',
                 )
-              : CrmTableScroll(
-                  child: DataTable(
-                    columns: const [
-                      DataColumn(label: Text('منبع')),
-                      DataColumn(label: Text('شماره')),
-                      DataColumn(label: Text('طرف حساب')),
-                      DataColumn(label: Text('وضعیت')),
-                      DataColumn(label: Text('ردیف کالا')),
-                      DataColumn(label: Text('مبلغ کل')),
-                      DataColumn(label: Text('عملیات')),
-                    ],
-                    rows: entries
-                        .map(
-                          (entry) => DataRow(
-                            cells: [
-                              DataCell(Text(entry.sourceLabel)),
-                              DataCell(Text(entry.number)),
-                              DataCell(Text(entry.customer)),
-                              DataCell(StatusPill(label: entry.status)),
-                              DataCell(
-                                Text(formatPersianInteger(entry.lines.length)),
-                              ),
-                              DataCell(Text(compactMoney(entry.totalAmount))),
-                              DataCell(
-                                Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    if (entry.status != 'فاکتور صادر شد')
-                                      FilledButton.tonal(
-                                        onPressed: () => _issue(entry),
-                                        child: const Text('صدور'),
-                                      ),
-                                    IconButton(
-                                      onPressed: () => _print(entry),
-                                      tooltip: 'چاپ فاکتور',
-                                      icon: const Icon(Icons.print_outlined),
-                                    ),
-                                    IconButton(
-                                      onPressed: () => _edit(entry),
-                                      tooltip: 'ویرایش سند منبع',
-                                      icon: const Icon(Icons.edit_outlined),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ],
+              : CrmConfigurableDataTable<_InvoiceEntry>(
+                  tableId: 'invoices_${widget.direction}',
+                  rows: entries,
+                  initialSortColumnId: 'updated',
+                  initialSortAscending: false,
+                  columns: [
+                    CrmTableColumn(
+                      id: 'source',
+                      label: 'منبع',
+                      value: (entry) => entry.sourceLabel,
+                    ),
+                    CrmTableColumn(
+                      id: 'number',
+                      label: 'شماره',
+                      value: (entry) => entry.number,
+                    ),
+                    CrmTableColumn(
+                      id: 'customer',
+                      label: 'طرف حساب',
+                      value: (entry) => entry.customer,
+                    ),
+                    CrmTableColumn(
+                      id: 'status',
+                      label: 'وضعیت',
+                      value: (entry) => entry.status,
+                      cell: (context, entry) => StatusPill(label: entry.status),
+                    ),
+                    CrmTableColumn(
+                      id: 'lines',
+                      label: 'ردیف کالا',
+                      value: (entry) =>
+                          formatPersianInteger(entry.lines.length),
+                      sortValue: (entry) => entry.lines.length,
+                      numeric: true,
+                    ),
+                    CrmTableColumn(
+                      id: 'total',
+                      label: 'مبلغ کل',
+                      value: (entry) => compactMoney(entry.totalAmount),
+                      sortValue: (entry) => entry.totalAmount,
+                      numeric: true,
+                    ),
+                    CrmTableColumn(
+                      id: 'updated',
+                      label: 'آخرین تغییر',
+                      value: (entry) => compactDate(entry.updatedAt),
+                      sortValue: (entry) => entry.updatedAt,
+                      initiallyVisible: false,
+                    ),
+                    CrmTableColumn(
+                      id: 'actions',
+                      label: 'عملیات',
+                      value: (_) => '',
+                      canHide: false,
+                      filterable: false,
+                      cell: (context, entry) => Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          if (entry.status != 'فاکتور صادر شد')
+                            FilledButton.tonal(
+                              onPressed: () => _issue(entry),
+                              child: const Text('صدور'),
+                            ),
+                          IconButton(
+                            onPressed: () => _print(entry),
+                            tooltip: 'چاپ فاکتور',
+                            icon: const Icon(Icons.print_outlined),
                           ),
-                        )
-                        .toList(),
-                  ),
+                          IconButton(
+                            onPressed: () => _edit(entry),
+                            tooltip: 'ویرایش سند منبع',
+                            icon: const Icon(Icons.edit_outlined),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
                 ),
         ),
       ],

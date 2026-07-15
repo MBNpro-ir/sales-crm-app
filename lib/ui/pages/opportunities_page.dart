@@ -16,9 +16,11 @@ class OpportunitiesPage extends StatefulWidget {
 
 class _OpportunitiesPageState extends State<OpportunitiesPage> {
   final _search = TextEditingController();
-  int _sortColumn = 4;
-  bool _sortAscending = false;
   String? _tradeFilter;
+  String? _productFilter;
+  String? _provinceFilter;
+  String? _cityFilter;
+  bool _showActive = true;
   bool _showRealized = false;
 
   @override
@@ -61,15 +63,6 @@ class _OpportunitiesPageState extends State<OpportunitiesPage> {
     }
   }
 
-  void _sort(int index) => setState(() {
-    if (_sortColumn == index) {
-      _sortAscending = !_sortAscending;
-    } else {
-      _sortColumn = index;
-      _sortAscending = true;
-    }
-  });
-
   Future<void> _toggleRealized(CrmOpportunity item, bool realized) async {
     final customer = widget.store.customers.firstWhere(
       (customer) => customer.id == item.customerId,
@@ -84,65 +77,102 @@ class _OpportunitiesPageState extends State<OpportunitiesPage> {
       notes: item.notes,
       expectedClose: item.expectedClose,
       tradeType: item.tradeType,
+      productName: item.productName,
+      province: item.province,
+      city: item.city,
     );
   }
 
-  Future<void> _printReport() => CrmReportService.printTable(
-    title: 'گزارش فرصت‌های خرید و فروش',
-    headers: const [
-      'مشتری',
-      'عنوان',
-      'نوع',
-      'مرحله',
-      'مبلغ',
-      'احتمال',
-      'تاریخ هدف',
-    ],
-    rows: widget.store.opportunities
-        .map(
-          (item) => <Object?>[
-            item.customerName,
-            item.title,
-            item.tradeType,
-            item.stage,
-            formatPersianInteger(item.amount),
-            '${formatPersianInteger(item.probability)}٪',
-            item.expectedClose == null ? '—' : compactDate(item.expectedClose!),
-          ],
-        )
-        .toList(),
-  );
+  List<CrmOpportunity> _filteredOpportunities() {
+    final needle = _search.text.trim().toLowerCase();
+    return widget.store.opportunities.where((item) {
+      final realized = item.stage == 'برنده شده';
+      final matchesVisibility =
+          (_showActive && !realized) || (_showRealized && realized);
+      return matchesVisibility &&
+          (needle.isEmpty ||
+              item.title.toLowerCase().contains(needle) ||
+              item.customerName.toLowerCase().contains(needle) ||
+              item.productName.toLowerCase().contains(needle) ||
+              item.province.toLowerCase().contains(needle) ||
+              item.city.toLowerCase().contains(needle) ||
+              item.stage.contains(needle)) &&
+          (_tradeFilter == null || item.tradeType == _tradeFilter) &&
+          (_productFilter == null || item.productName == _productFilter) &&
+          (_provinceFilter == null || item.province == _provinceFilter) &&
+          (_cityFilter == null || item.city == _cityFilter);
+    }).toList();
+  }
+
+  Future<void> _printReport() {
+    final opportunities = _filteredOpportunities();
+    return CrmReportService.printTable(
+      context: context,
+      title: 'گزارش فرصت‌های خرید و فروش',
+      subtitle:
+          'قابل تنظیم بر اساس بازه تاریخ، مشتری، کالا و خدمات، شهر، استان و سطح کل/معین/تفصیلی',
+      headers: const [
+        'ردیف',
+        'مشتری',
+        'عنوان',
+        'نوع',
+        'کالا / خدمت',
+        'استان هدف',
+        'شهر هدف',
+        'مرحله',
+        'مبلغ',
+        'احتمال',
+        'تاریخ هدف',
+      ],
+      rows: opportunities.asMap().entries.map((entry) {
+        final item = entry.value;
+        return <Object?>[
+          entry.key + 1,
+          item.customerName,
+          item.title,
+          item.tradeType,
+          item.productName,
+          item.province,
+          item.city,
+          item.stage,
+          item.amount,
+          item.probability,
+          item.expectedClose == null ? '—' : compactDate(item.expectedClose!),
+        ];
+      }).toList(),
+      rowDates: opportunities.map((item) => item.expectedClose).toList(),
+      numericColumns: const {8, 9},
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
-    final needle = _search.text.trim().toLowerCase();
-    final rows = widget.store.opportunities
-        .where(
-          (item) =>
-              (needle.isEmpty ||
-                  item.title.toLowerCase().contains(needle) ||
-                  item.customerName.toLowerCase().contains(needle) ||
-                  item.stage.contains(needle)) &&
-              (_tradeFilter == null || item.tradeType == _tradeFilter) &&
-              (_showRealized
-                  ? item.stage == 'برنده شده'
-                  : item.stage != 'برنده شده'),
-        )
-        .toList();
-    final values = <Comparable<Object?> Function(CrmOpportunity)>[
-      (item) => item.customerName,
-      (item) => item.title,
-      (item) => item.stage,
-      (item) => item.amount,
-      (item) => item.probability,
-      (item) => item.expectedClose ?? DateTime(9999),
-    ];
-    rows.sort((left, right) {
-      final result = values[_sortColumn](
-        left,
-      ).compareTo(values[_sortColumn](right));
-      return _sortAscending ? result : -result;
-    });
+    final rows = _filteredOpportunities();
+    final products =
+        widget.store.opportunities
+            .map((item) => item.productName)
+            .where((value) => value.isNotEmpty)
+            .toSet()
+            .toList()
+          ..sort();
+    final provinces =
+        widget.store.opportunities
+            .map((item) => item.province)
+            .where((value) => value.isNotEmpty)
+            .toSet()
+            .toList()
+          ..sort();
+    final cities =
+        widget.store.opportunities
+            .where(
+              (item) =>
+                  _provinceFilter == null || item.province == _provinceFilter,
+            )
+            .map((item) => item.city)
+            .where((value) => value.isNotEmpty)
+            .toSet()
+            .toList()
+          ..sort();
     final total = widget.store.opportunities.fold<int>(
       0,
       (sum, item) => sum + item.amount,
@@ -186,6 +216,7 @@ class _OpportunitiesPageState extends State<OpportunitiesPage> {
                 value: widget.store.openOpportunities.toString(),
                 icon: Icons.track_changes_rounded,
                 color: const Color(0xff8349d6),
+                onTap: () => setState(() => _showActive = true),
               ),
             ),
             SizedBox(
@@ -278,23 +309,49 @@ class _OpportunitiesPageState extends State<OpportunitiesPage> {
                   onChanged: (value) => setState(() => _tradeFilter = value),
                 ),
               ),
-              SegmentedButton<bool>(
-                segments: const [
-                  ButtonSegment(value: false, label: Text('فرصت‌های فعال')),
-                  ButtonSegment(value: true, label: Text('اهداف تحقق‌یافته')),
-                ],
-                selected: {_showRealized},
-                onSelectionChanged: (value) =>
-                    setState(() => _showRealized = value.first),
+              _filterDropdown(
+                label: 'کالا / خدمت',
+                value: _productFilter,
+                values: products,
+                onChanged: (value) => setState(() => _productFilter = value),
+              ),
+              _filterDropdown(
+                label: 'استان هدف',
+                value: _provinceFilter,
+                values: provinces,
+                onChanged: (value) => setState(() {
+                  _provinceFilter = value;
+                  if (value != null && !cities.contains(_cityFilter)) {
+                    _cityFilter = null;
+                  }
+                }),
+              ),
+              _filterDropdown(
+                label: 'شهر هدف',
+                value: _cityFilter,
+                values: cities,
+                onChanged: (value) => setState(() => _cityFilter = value),
+              ),
+              FilterChip(
+                selected: _showActive,
+                label: const Text('فرصت‌های فعال'),
+                onSelected: (value) => setState(() => _showActive = value),
+              ),
+              FilterChip(
+                selected: _showRealized,
+                label: const Text('اهداف تحقق‌یافته'),
+                onSelected: (value) => setState(() => _showRealized = value),
               ),
             ],
           ),
         ),
         const SizedBox(height: 18),
         SectionCard(
-          title: _showRealized
+          title: _showActive && _showRealized
+              ? 'همه فرصت‌های ثبت‌شده'
+              : _showRealized
               ? 'فرصت‌های تحقق‌یافته (لیست اهداف)'
-              : 'فرصت‌های ثبت‌شده',
+              : 'فرصت‌های فعال',
           trailing: Text('${formatPersianInteger(rows.length)} مورد'),
           child: rows.isEmpty
               ? const EmptyState(
@@ -302,101 +359,126 @@ class _OpportunitiesPageState extends State<OpportunitiesPage> {
                   title: 'فرصتی پیدا نشد',
                   message: 'فرصت جدیدی ثبت کنید یا جست‌وجو را تغییر دهید.',
                 )
-              : CrmTableScroll(
-                  child: DataTable(
-                    headingRowColor: WidgetStatePropertyAll(
-                      Theme.of(context).colorScheme.surfaceContainerHighest,
+              : CrmConfigurableDataTable<CrmOpportunity>(
+                  tableId: 'opportunities',
+                  rows: rows,
+                  initialSortColumnId: 'target_date',
+                  columns: [
+                    CrmTableColumn(
+                      id: 'row',
+                      label: 'ردیف',
+                      value: (item) =>
+                          formatPersianInteger(rows.indexOf(item) + 1),
+                      numeric: true,
                     ),
-                    sortColumnIndex: _sortColumn,
-                    sortAscending: _sortAscending,
-                    columns: [
-                      DataColumn(
-                        label: const Text('مشتری'),
-                        onSort: (_, _) => _sort(0),
-                      ),
-                      DataColumn(
-                        label: const Text('عنوان'),
-                        onSort: (_, _) => _sort(1),
-                      ),
-                      DataColumn(
-                        label: const Text('نوع'),
-                        onSort: (_, _) => _sort(2),
-                      ),
-                      DataColumn(
-                        label: const Text('مرحله'),
-                        onSort: (_, _) => _sort(2),
-                      ),
-                      DataColumn(
-                        label: const Text('مبلغ (ریال)'),
-                        numeric: true,
-                        onSort: (_, _) => _sort(3),
-                      ),
-                      DataColumn(
-                        label: const Text('احتمال'),
-                        numeric: true,
-                        onSort: (_, _) => _sort(4),
-                      ),
-                      DataColumn(
-                        label: const Text('تاریخ هدف'),
-                        onSort: (_, _) => _sort(5),
-                      ),
-                      const DataColumn(label: Text('عملیات')),
-                    ],
-                    rows: rows
-                        .map(
-                          (item) => DataRow(
-                            cells: [
-                              DataCell(Text(item.customerName)),
-                              DataCell(
-                                SizedBox(
-                                  width: 190,
-                                  child: Text(
-                                    item.title,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                ),
-                              ),
-                              DataCell(Text(item.tradeType)),
-                              DataCell(StatusPill(label: item.stage)),
-                              DataCell(Text(compactMoney(item.amount))),
-                              DataCell(
-                                Text(
-                                  '${formatPersianInteger(item.probability)}٪',
-                                ),
-                              ),
-                              DataCell(
-                                Text(
-                                  item.expectedClose == null
-                                      ? '—'
-                                      : compactDate(item.expectedClose!),
-                                ),
-                              ),
-                              DataCell(
-                                Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Checkbox(
-                                      value: item.stage == 'برنده شده',
-                                      onChanged: (value) =>
-                                          _toggleRealized(item, value ?? false),
-                                    ),
-                                    RecordActions(
-                                      onEdit: () => _openEditor(item),
-                                      onDelete: () => _delete(item),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ],
+                    CrmTableColumn(
+                      id: 'customer',
+                      label: 'مشتری',
+                      value: (item) => item.customerName,
+                    ),
+                    CrmTableColumn(
+                      id: 'title',
+                      label: 'عنوان',
+                      value: (item) => item.title,
+                    ),
+                    CrmTableColumn(
+                      id: 'trade_type',
+                      label: 'نوع',
+                      value: (item) => item.tradeType,
+                    ),
+                    CrmTableColumn(
+                      id: 'product',
+                      label: 'کالا / خدمت',
+                      value: (item) =>
+                          item.productName.isEmpty ? '—' : item.productName,
+                    ),
+                    CrmTableColumn(
+                      id: 'province',
+                      label: 'استان هدف',
+                      value: (item) =>
+                          item.province.isEmpty ? '—' : item.province,
+                    ),
+                    CrmTableColumn(
+                      id: 'city',
+                      label: 'شهر هدف',
+                      value: (item) => item.city.isEmpty ? '—' : item.city,
+                    ),
+                    CrmTableColumn(
+                      id: 'stage',
+                      label: 'مرحله',
+                      value: (item) => item.stage,
+                      cell: (context, item) => StatusPill(label: item.stage),
+                    ),
+                    CrmTableColumn(
+                      id: 'amount',
+                      label: 'مبلغ (ریال)',
+                      value: (item) => compactMoney(item.amount),
+                      sortValue: (item) => item.amount,
+                      numeric: true,
+                    ),
+                    CrmTableColumn(
+                      id: 'probability',
+                      label: 'احتمال',
+                      value: (item) =>
+                          '${formatPersianInteger(item.probability)}٪',
+                      sortValue: (item) => item.probability,
+                      numeric: true,
+                    ),
+                    CrmTableColumn(
+                      id: 'target_date',
+                      label: 'تاریخ هدف',
+                      value: (item) => item.expectedClose == null
+                          ? '—'
+                          : compactDate(item.expectedClose!),
+                      sortValue: (item) => item.expectedClose,
+                    ),
+                    CrmTableColumn(
+                      id: 'actions',
+                      label: 'عملیات',
+                      value: (_) => '',
+                      filterable: false,
+                      canHide: false,
+                      cell: (context, item) => Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Checkbox(
+                            value: item.stage == 'برنده شده',
+                            onChanged: (value) =>
+                                _toggleRealized(item, value ?? false),
                           ),
-                        )
-                        .toList(),
-                  ),
+                          RecordActions(
+                            onEdit: () => _openEditor(item),
+                            onDelete: () => _delete(item),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
                 ),
         ),
       ],
     );
   }
+
+  Widget _filterDropdown({
+    required String label,
+    required String? value,
+    required List<String> values,
+    required ValueChanged<String?> onChanged,
+  }) => SizedBox(
+    width: 190,
+    child: DropdownButtonFormField<String?>(
+      initialValue: value,
+      decoration: InputDecoration(labelText: label),
+      items: [
+        const DropdownMenuItem<String?>(value: null, child: Text('همه')),
+        ...values.map(
+          (item) => DropdownMenuItem<String?>(value: item, child: Text(item)),
+        ),
+      ],
+      onChanged: onChanged,
+    ),
+  );
 }
 
 class _OpportunityEditor extends StatefulWidget {
@@ -413,10 +495,13 @@ class _OpportunityEditorState extends State<_OpportunityEditor> {
   final _form = GlobalKey<FormState>();
   final _title = TextEditingController();
   final _amount = TextEditingController(text: '۰');
+  final _province = TextEditingController();
+  final _city = TextEditingController();
   final _notes = TextEditingController();
   String? _customerId;
   String _stage = 'تماس اولیه';
   String _tradeType = 'فروش';
+  String? _productName;
   double _probability = 20;
   DateTime? _expectedClose = DateTime.now().add(const Duration(days: 30));
   bool _saving = false;
@@ -432,6 +517,9 @@ class _OpportunityEditorState extends State<_OpportunityEditor> {
     _notes.text = item.notes;
     _stage = item.stage;
     _tradeType = item.tradeType;
+    _productName = item.productName.isEmpty ? null : item.productName;
+    _province.text = item.province;
+    _city.text = item.city;
     _probability = item.probability.toDouble();
     _expectedClose = item.expectedClose;
   }
@@ -440,6 +528,8 @@ class _OpportunityEditorState extends State<_OpportunityEditor> {
   void dispose() {
     _title.dispose();
     _amount.dispose();
+    _province.dispose();
+    _city.dispose();
     _notes.dispose();
     super.dispose();
   }
@@ -471,6 +561,9 @@ class _OpportunityEditorState extends State<_OpportunityEditor> {
       probability: _probability.round(),
       notes: _notes.text,
       tradeType: _tradeType,
+      productName: _productName ?? '',
+      province: _province.text,
+      city: _city.text,
       expectedClose: _expectedClose,
     );
     if (mounted) Navigator.of(context).pop(true);
@@ -478,6 +571,12 @@ class _OpportunityEditorState extends State<_OpportunityEditor> {
 
   @override
   Widget build(BuildContext context) {
+    final productNames = {
+      ...widget.store.products
+          .where((item) => item.isActive)
+          .map((item) => item.name),
+      if (_productName != null && _productName!.isNotEmpty) _productName!,
+    };
     const stages = [
       'تماس اولیه',
       'نیازسنجی',
@@ -519,7 +618,20 @@ class _OpportunityEditorState extends State<_OpportunityEditor> {
                         .toList(),
                     validator: (value) =>
                         value == null ? 'یک مشتری انتخاب کنید.' : null,
-                    onChanged: (value) => setState(() => _customerId = value),
+                    onChanged: (value) => setState(() {
+                      _customerId = value;
+                      CrmCustomer? customer;
+                      for (final item in widget.store.customers) {
+                        if (item.id == value) {
+                          customer = item;
+                          break;
+                        }
+                      }
+                      if (customer != null) {
+                        _province.text = customer.province;
+                        _city.text = customer.city;
+                      }
+                    }),
                   ),
                 ),
                 ResponsiveFormField.full(
@@ -549,6 +661,53 @@ class _OpportunityEditorState extends State<_OpportunityEditor> {
                     ],
                     onChanged: (value) =>
                         setState(() => _tradeType = value ?? _tradeType),
+                  ),
+                ),
+                ResponsiveFormField.full(
+                  child: DropdownButtonFormField<String?>(
+                    initialValue: _productName,
+                    isExpanded: true,
+                    decoration: const InputDecoration(
+                      labelText: 'کالا / خدمات مرتبط',
+                      prefixIcon: Icon(Icons.inventory_2_outlined),
+                    ),
+                    items: [
+                      const DropdownMenuItem<String?>(
+                        value: null,
+                        child: Text('بدون انتخاب'),
+                      ),
+                      ...productNames.map(
+                        (name) => DropdownMenuItem<String?>(
+                          value: name,
+                          child: Text(name),
+                        ),
+                      ),
+                    ],
+                    onChanged: (value) => setState(() => _productName = value),
+                  ),
+                ),
+                ResponsiveFormField(
+                  child: AutoInputDirection(
+                    controller: _province,
+                    child: TextFormField(
+                      controller: _province,
+                      decoration: const InputDecoration(
+                        labelText: 'استان هدف',
+                        prefixIcon: Icon(Icons.map_outlined),
+                      ),
+                    ),
+                  ),
+                ),
+                ResponsiveFormField(
+                  child: AutoInputDirection(
+                    controller: _city,
+                    child: TextFormField(
+                      controller: _city,
+                      decoration: const InputDecoration(
+                        labelText: 'شهر هدف',
+                        prefixIcon: Icon(Icons.location_city_outlined),
+                      ),
+                    ),
                   ),
                 ),
                 ResponsiveFormField(

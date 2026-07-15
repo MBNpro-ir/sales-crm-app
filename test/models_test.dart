@@ -41,6 +41,58 @@ void main() {
     expect(line.totalAmount, 990000);
   });
 
+  test('call calculates discount, value added tax and final total', () {
+    final call = CrmCall.fromJson({
+      'id': 'call-1',
+      'customer_id': 'customer-1',
+      'customer_name': 'مشتری آزمون',
+      'subject': 'فروش آزمایشی',
+      'type': 'تلفنی',
+      'status': 'موفق',
+      'call_at': '2026-07-15T09:30:00.000Z',
+      'duration_minutes': 10,
+      'notes': '',
+      'trade_type': 'فروش',
+      'quantity': 2,
+      'unit_price': 500000,
+      'amount': 1000000,
+      'discount_amount': 100000,
+      'tax_percent': 10,
+      'updated_at': '2026-07-15T09:30:00.000Z',
+    });
+
+    expect(call.subtotal, 1000000);
+    expect(call.netAmount, 900000);
+    expect(call.taxAmount, 90000);
+    expect(call.totalAmount, 990000);
+    expect(call.hasTradeOutcome, isTrue);
+    expect(call.toJson()['discount_amount'], 100000);
+  });
+
+  test('opportunity preserves product and target location through JSON', () {
+    final opportunity = CrmOpportunity.fromJson({
+      'id': 'opportunity-1',
+      'customer_id': 'customer-1',
+      'customer_name': 'مشتری آزمون',
+      'title': 'فرصت فروش',
+      'stage': 'نیازسنجی',
+      'amount': 2000000,
+      'probability': 40,
+      'notes': '',
+      'owner_name': 'مدیر',
+      'trade_type': 'فروش',
+      'product_name': 'کالای آزمون',
+      'province': 'تهران',
+      'city': 'تهران',
+      'updated_at': '2026-07-15T09:30:00.000Z',
+    });
+
+    expect(opportunity.productName, 'کالای آزمون');
+    expect(opportunity.province, 'تهران');
+    expect(opportunity.city, 'تهران');
+    expect(opportunity.toJson()['city'], 'تهران');
+  });
+
   test('quotes preserve direction and line items through sync JSON', () {
     final quote = CrmQuote.fromJson({
       'id': 'quote-1',

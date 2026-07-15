@@ -4,11 +4,14 @@ import '../../core/crm_store.dart';
 import '../../core/models.dart';
 import '../../core/report_service.dart';
 import '../widgets/common.dart';
+import 'calls_page.dart';
+import 'documents_page.dart';
 
 class CustomersPage extends StatefulWidget {
-  const CustomersPage({super.key, required this.store});
+  const CustomersPage({super.key, required this.store, this.onOpenProducts});
 
   final CrmStore store;
+  final VoidCallback? onOpenProducts;
 
   @override
   State<CustomersPage> createState() => _CustomersPageState();
@@ -20,14 +23,10 @@ class _CustomersPageState extends State<CustomersPage> {
   final _nameFilter = TextEditingController();
   final _mobileFilter = TextEditingController();
   final _cityFilter = TextEditingController();
-  int _sortColumn = 0;
-  bool _sortAscending = true;
   String? _activityFilter;
   String? _statusFilter;
   String? _priorityFilter;
   String? _provinceFilter;
-  String _groupBy = 'نوع فعالیت';
-  bool _vipOnly = false;
 
   @override
   void dispose() {
@@ -66,17 +65,6 @@ class _CustomersPageState extends State<CustomersPage> {
     }
   }
 
-  void _sort(int column) {
-    setState(() {
-      if (_sortColumn == column) {
-        _sortAscending = !_sortAscending;
-      } else {
-        _sortColumn = column;
-        _sortAscending = true;
-      }
-    });
-  }
-
   List<CrmCustomer> _filteredCustomers() {
     final needle = _search.text.trim().toLowerCase();
     return widget.store.customers.where((customer) {
@@ -103,8 +91,7 @@ class _CustomersPageState extends State<CustomersPage> {
               customer.activityType == _activityFilter) &&
           (_statusFilter == null || customer.status == _statusFilter) &&
           (_priorityFilter == null || customer.priority == _priorityFilter) &&
-          (_provinceFilter == null || customer.province == _provinceFilter) &&
-          (!_vipOnly || customer.isVip);
+          (_provinceFilter == null || customer.province == _provinceFilter);
     }).toList();
   }
 
@@ -209,59 +196,130 @@ class _CustomersPageState extends State<CustomersPage> {
     }
   }
 
-  Future<void> _printPhonebook() => CrmReportService.printTable(
-    title: 'دفترچه تلفن مشتریان',
-    headers: const [
-      'کد',
-      'نام / شرکت',
-      'موبایل',
-      'تلفن',
-      'استان',
-      'شهر',
-      'فعالیت',
-    ],
-    rows: _filteredCustomers()
-        .map(
-          (item) => <Object?>[
-            item.customerCode,
-            item.displayName,
-            item.mobile,
-            item.phone,
-            item.province,
-            item.city,
-            item.activityType,
-          ],
-        )
-        .toList(),
-  );
+  Future<void> _openPhonebook([List<CrmCustomer>? source]) =>
+      CrmReportService.printTable(
+        context: context,
+        title: 'دفترچه تلفن مشتریان',
+        subtitle: 'نمایش کامل، فیلتر، مرتب‌سازی و شخصی‌سازی دفتر تلفن',
+        headers: _exportHeaders,
+        rows: _rowsForExport(source ?? _filteredCustomers()),
+      );
 
-  Future<void> _copyPhonebook() async {
-    await CrmReportService.copyTable(
-      headers: const ['نام / شرکت', 'موبایل', 'تلفن'],
-      rows: _filteredCustomers()
-          .map((item) => <Object?>[item.displayName, item.mobile, item.phone])
-          .toList(),
+  Future<void> _newCall(CrmCustomer customer) async {
+    await showCrmCallEditor(
+      context,
+      store: widget.store,
+      initialCustomerId: customer.id,
+      onOpenProducts: widget.onOpenProducts,
     );
-    if (mounted) showCrmNotice(context, 'دفترچه تلفن در کلیپ‌بورد کپی شد.');
+  }
+
+  Future<void> _newQuote(CrmCustomer customer) async {
+    final saved = await showDialog<bool>(
+      context: context,
+      builder: (context) => DocumentEditorDialog(
+        store: widget.store,
+        mode: DocumentPageMode.quote,
+        initialCustomerId: customer.id,
+      ),
+    );
+    if (mounted && saved == true) {
+      showCrmNotice(
+        context,
+        'پیش‌فاکتور مشتری ثبت شد.',
+        type: CrmNoticeType.success,
+      );
+    }
+  }
+
+  Future<void> _backupTools() async {
+    final action = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('تهیه و بازیابی پشتیبانی'),
+        content: const Text(
+          'نسخه پشتیبان شامل تمام اطلاعات فضای کاری محلی، صف همگام‌سازی و اسناد است.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('انصراف'),
+          ),
+          OutlinedButton.icon(
+            onPressed: () => Navigator.pop(context, 'restore'),
+            icon: const Icon(Icons.restore_rounded),
+            label: const Text('بازیابی پشتیبان'),
+          ),
+          FilledButton.icon(
+            onPressed: () => Navigator.pop(context, 'create'),
+            icon: const Icon(Icons.backup_outlined),
+            label: const Text('تهیه پشتیبان'),
+          ),
+        ],
+      ),
+    );
+    if (action == 'create') {
+      final data = await widget.store.createWorkspaceBackup();
+      final path = await CrmReportService.saveJsonFile(
+        suggestedName: 'sales-crm-backup.json',
+        data: data,
+      );
+      if (mounted && path != null) {
+        showCrmNotice(
+          context,
+          'نسخه پشتیبان با موفقیت ذخیره شد.',
+          type: CrmNoticeType.success,
+        );
+      }
+    } else if (action == 'restore') {
+      final data = await CrmReportService.pickJsonObject();
+      if (data == null || !mounted) return;
+      final confirmed =
+          await showDialog<bool>(
+            context: context,
+            builder: (context) => AlertDialog(
+              title: const Text('تایید بازیابی'),
+              content: const Text(
+                'اطلاعات فعلی فضای کاری با محتوای فایل پشتیبان جایگزین می‌شود. ادامه می‌دهید؟',
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context, false),
+                  child: const Text('انصراف'),
+                ),
+                FilledButton.tonal(
+                  onPressed: () => Navigator.pop(context, true),
+                  child: const Text('بازیابی'),
+                ),
+              ],
+            ),
+          ) ??
+          false;
+      if (!confirmed) return;
+      await widget.store.restoreWorkspaceBackup(data);
+      if (mounted) {
+        showCrmNotice(
+          context,
+          'نسخه پشتیبان بازیابی شد.',
+          type: CrmNoticeType.success,
+        );
+      }
+    }
+  }
+
+  Future<void> _sync() async {
+    await widget.store.sync();
+    if (!mounted) return;
+    showCrmNotice(
+      context,
+      widget.store.syncMessage,
+      type: widget.store.online ? CrmNoticeType.success : CrmNoticeType.warning,
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     final rows = _filteredCustomers();
-    final comparators = <Comparable<Object?> Function(CrmCustomer)>[
-      (item) => item.customerCode,
-      (item) => item.company.isEmpty ? item.name : item.company,
-      (item) => item.mobile,
-      (item) => item.city,
-      (item) => item.status,
-      (item) => item.priority,
-    ];
-    rows.sort((left, right) {
-      final result = comparators[_sortColumn](
-        left,
-      ).compareTo(comparators[_sortColumn](right));
-      return _sortAscending ? result : -result;
-    });
     return ListView(
       children: [
         CrmPageHeader(
@@ -269,28 +327,33 @@ class _CustomersPageState extends State<CustomersPage> {
           subtitle:
               'اطلاعات مشتری، وضعیت ارتباط و اولویت فروش را یکجا نگه دارید.',
           actions: [
-            OutlinedButton.icon(
-              onPressed: _importExcel,
-              icon: const Icon(Icons.upload_file_outlined),
-              label: const Text('ورودی اکسل'),
-            ),
             PopupMenuButton<String>(
-              tooltip: 'خروجی و چاپ',
+              tooltip: 'ابزار / امکانات',
               onSelected: (value) {
-                if (value == 'excel') _exportExcel();
-                if (value == 'print') _printPhonebook();
-                if (value == 'copy') _copyPhonebook();
+                if (value == 'import') _importExcel();
+                if (value == 'export') _exportExcel();
+                if (value == 'phonebook') _openPhonebook();
+                if (value == 'backup') _backupTools();
+                if (value == 'sync') _sync();
               },
               itemBuilder: (context) => const [
-                PopupMenuItem(value: 'excel', child: Text('خروجی Excel')),
-                PopupMenuItem(value: 'print', child: Text('چاپ دفترچه تلفن')),
-                PopupMenuItem(value: 'copy', child: Text('کپی دفترچه تلفن')),
+                PopupMenuItem(
+                  value: 'import',
+                  child: Text('ورود اطلاعات از اکسل'),
+                ),
+                PopupMenuItem(value: 'export', child: Text('خروجی از اکسل')),
+                PopupMenuItem(value: 'phonebook', child: Text('دفتر تلفن')),
+                PopupMenuItem(
+                  value: 'backup',
+                  child: Text('تهیه و بازیابی پشتیبانی'),
+                ),
+                PopupMenuItem(value: 'sync', child: Text('همگام‌سازی')),
               ],
               child: IgnorePointer(
                 child: OutlinedButton.icon(
                   onPressed: () {},
-                  icon: const Icon(Icons.ios_share_outlined),
-                  label: const Text('خروجی'),
+                  icon: const Icon(Icons.handyman_outlined),
+                  label: const Text('ابزار / امکانات'),
                 ),
               ),
             ),
@@ -303,7 +366,7 @@ class _CustomersPageState extends State<CustomersPage> {
         ),
         const SizedBox(height: 22),
         SectionCard(
-          title: 'فیلتر هر ستون و دسته‌بندی',
+          title: 'فیلتر هر ستون',
           child: Wrap(
             spacing: 10,
             runSpacing: 10,
@@ -328,7 +391,7 @@ class _CustomersPageState extends State<CustomersPage> {
               _filterDropdown(
                 'اولویت',
                 _priorityFilter,
-                const ['خیلی بالا', 'بالا', 'متوسط', 'پایین'],
+                widget.store.customerPriorities,
                 (value) => setState(() => _priorityFilter = value),
               ),
               _filterDropdown(
@@ -341,60 +404,9 @@ class _CustomersPageState extends State<CustomersPage> {
                     .toList(),
                 (value) => setState(() => _provinceFilter = value),
               ),
-              SizedBox(
-                width: 190,
-                child: DropdownButtonFormField<String>(
-                  initialValue: _groupBy,
-                  decoration: const InputDecoration(
-                    labelText: 'دسته‌بندی بر اساس',
-                  ),
-                  items: const ['نوع فعالیت', 'اولویت', 'استان', 'وضعیت']
-                      .map(
-                        (item) =>
-                            DropdownMenuItem(value: item, child: Text(item)),
-                      )
-                      .toList(),
-                  onChanged: (value) =>
-                      setState(() => _groupBy = value ?? _groupBy),
-                ),
-              ),
-              FilterChip(
-                selected: _vipOnly,
-                label: const Text('فقط مشتریان VIP'),
-                avatar: const Icon(Icons.workspace_premium_outlined),
-                onSelected: (value) => setState(() => _vipOnly = value),
-              ),
             ],
           ),
         ),
-        if (rows.any((item) => item.isVip)) ...[
-          const SizedBox(height: 18),
-          SectionCard(
-            title: 'مشتریان VIP',
-            trailing: Text(
-              '${formatPersianInteger(rows.where((item) => item.isVip).length)} مشتری',
-            ),
-            child: Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: rows
-                  .where((item) => item.isVip)
-                  .map(
-                    (item) => ActionChip(
-                      avatar: const Icon(
-                        Icons.workspace_premium_rounded,
-                        size: 18,
-                      ),
-                      label: Text(item.displayName),
-                      onPressed: () => _openEditor(item),
-                    ),
-                  )
-                  .toList(),
-            ),
-          ),
-        ],
-        const SizedBox(height: 18),
-        _groupSummary(rows),
         const SizedBox(height: 18),
         if (rows.isEmpty)
           const SectionCard(
@@ -416,95 +428,127 @@ class _CustomersPageState extends State<CustomersPage> {
               ),
             ),
             padding: const EdgeInsets.all(12),
-            child: CrmTableScroll(
-              child: DataTable(
-                headingRowColor: WidgetStatePropertyAll(
-                  Theme.of(context).colorScheme.surfaceContainerHighest,
+            child: CrmConfigurableDataTable<CrmCustomer>(
+              tableId: 'customers',
+              rows: rows,
+              initialSortColumnId: 'code',
+              columns: [
+                CrmTableColumn(
+                  id: 'code',
+                  label: 'کد مشتری',
+                  value: (item) => item.customerCode,
                 ),
-                sortColumnIndex: _sortColumn,
-                sortAscending: _sortAscending,
-                columns: [
-                  DataColumn(
-                    label: const Text('کد مشتری'),
-                    onSort: (_, _) => _sort(0),
+                CrmTableColumn(
+                  id: 'name',
+                  label: 'نام مخاطب',
+                  value: (item) => item.name,
+                ),
+                CrmTableColumn(
+                  id: 'company',
+                  label: 'شرکت',
+                  value: (item) => item.company,
+                ),
+                CrmTableColumn(
+                  id: 'mobile',
+                  label: 'موبایل',
+                  value: (item) => item.mobile,
+                ),
+                CrmTableColumn(
+                  id: 'phone',
+                  label: 'تلفن',
+                  value: (item) => item.phone,
+                ),
+                CrmTableColumn(
+                  id: 'email',
+                  label: 'ایمیل',
+                  value: (item) => item.details['email'] ?? '',
+                  initiallyVisible: false,
+                ),
+                CrmTableColumn(
+                  id: 'province',
+                  label: 'استان',
+                  value: (item) => item.province,
+                ),
+                CrmTableColumn(
+                  id: 'city',
+                  label: 'شهر',
+                  value: (item) => item.city,
+                ),
+                CrmTableColumn(
+                  id: 'activity',
+                  label: 'نوع فعالیت',
+                  value: (item) => item.activityType,
+                ),
+                CrmTableColumn(
+                  id: 'status',
+                  label: 'وضعیت',
+                  value: (item) => item.status,
+                  cell: (context, item) => StatusPill(label: item.status),
+                ),
+                CrmTableColumn(
+                  id: 'priority',
+                  label: 'اولویت',
+                  value: (item) => item.priority,
+                ),
+                CrmTableColumn(
+                  id: 'vip',
+                  label: 'VIP',
+                  value: (item) => item.isVip ? 'بله' : 'خیر',
+                  cell: (context, item) => Icon(
+                    item.isVip ? Icons.workspace_premium_rounded : Icons.remove,
+                    color: item.isVip ? const Color(0xffe58a00) : null,
                   ),
-                  DataColumn(
-                    label: const Text('نام / شرکت'),
-                    onSort: (_, _) => _sort(1),
-                  ),
-                  DataColumn(
-                    label: const Text('موبایل'),
-                    onSort: (_, _) => _sort(2),
-                  ),
-                  DataColumn(
-                    label: const Text('شهر'),
-                    onSort: (_, _) => _sort(3),
-                  ),
-                  const DataColumn(label: Text('نوع فعالیت')),
-                  DataColumn(
-                    label: const Text('وضعیت'),
-                    onSort: (_, _) => _sort(4),
-                  ),
-                  DataColumn(
-                    label: const Text('اولویت'),
-                    onSort: (_, _) => _sort(5),
-                  ),
-                  const DataColumn(label: Text('VIP')),
-                  const DataColumn(label: Text('عملیات')),
-                ],
-                rows: rows.map((customer) {
-                  return DataRow(
-                    cells: [
-                      DataCell(Text(customer.customerCode)),
-                      DataCell(
-                        SizedBox(
-                          width: 210,
-                          child: Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                customer.company.isEmpty
-                                    ? customer.name
-                                    : customer.company,
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.w800,
-                                ),
-                              ),
-                              if (customer.company.isNotEmpty)
-                                Text(
-                                  customer.name,
-                                  style: Theme.of(context).textTheme.bodySmall,
-                                ),
-                            ],
-                          ),
-                        ),
+                ),
+                CrmTableColumn(
+                  id: 'tags',
+                  label: 'برچسب‌ها',
+                  value: (item) => item.tags.join('، '),
+                  initiallyVisible: false,
+                ),
+                CrmTableColumn(
+                  id: 'address',
+                  label: 'آدرس',
+                  value: (item) => item.details['address'] ?? '',
+                  initiallyVisible: false,
+                ),
+                CrmTableColumn(
+                  id: 'notes',
+                  label: 'یادداشت',
+                  value: (item) => item.notes,
+                  initiallyVisible: false,
+                ),
+                CrmTableColumn(
+                  id: 'actions',
+                  label: 'عملیات',
+                  value: (_) => '',
+                  filterable: false,
+                  canHide: false,
+                  cell: (context, customer) => PopupMenuButton<String>(
+                    tooltip: 'عملیات مشتری',
+                    onSelected: (value) {
+                      if (value == 'edit') _openEditor(customer);
+                      if (value == 'call') _newCall(customer);
+                      if (value == 'quote') _newQuote(customer);
+                      if (value == 'preview') _openPhonebook([customer]);
+                      if (value == 'delete') _delete(customer);
+                    },
+                    itemBuilder: (context) => const [
+                      PopupMenuItem(value: 'edit', child: Text('ویرایش')),
+                      PopupMenuItem(
+                        value: 'call',
+                        child: Text('ثبت تماس جدید'),
                       ),
-                      DataCell(Text(customer.mobile)),
-                      DataCell(Text(customer.city)),
-                      DataCell(Text(customer.activityType)),
-                      DataCell(StatusPill(label: customer.status)),
-                      DataCell(Text(customer.priority)),
-                      DataCell(
-                        Icon(
-                          customer.isVip
-                              ? Icons.workspace_premium_rounded
-                              : Icons.remove,
-                          color: customer.isVip
-                              ? const Color(0xffe58a00)
-                              : null,
-                        ),
+                      PopupMenuItem(value: 'quote', child: Text('پیش‌فاکتور')),
+                      PopupMenuItem(
+                        value: 'preview',
+                        child: Text('نمایش و پرینت'),
                       ),
-                      DataCell(
-                        RecordActions(
-                          onEdit: () => _openEditor(customer),
-                          onDelete: () => _delete(customer),
-                        ),
-                      ),
+                      PopupMenuDivider(),
+                      PopupMenuItem(value: 'delete', child: Text('حذف')),
                     ],
-                  );
-                }).toList(),
-              ),
+                  ),
+                ),
+              ],
             ),
           ),
       ],
@@ -543,36 +587,6 @@ class _CustomersPageState extends State<CustomersPage> {
       onChanged: changed,
     ),
   );
-
-  Widget _groupSummary(List<CrmCustomer> rows) {
-    final groups = <String, int>{};
-    for (final item in rows) {
-      final rawKey = switch (_groupBy) {
-        'اولویت' => item.priority,
-        'استان' => item.province,
-        'وضعیت' => item.status,
-        _ => item.activityType,
-      };
-      final key = rawKey.isEmpty ? 'نامشخص' : rawKey;
-      groups[key] = (groups[key] ?? 0) + 1;
-    }
-    return SectionCard(
-      title: 'خلاصه دسته‌بندی بر اساس $_groupBy',
-      child: Wrap(
-        spacing: 8,
-        runSpacing: 8,
-        children: groups.entries
-            .map(
-              (entry) => Chip(
-                label: Text(
-                  '${entry.key}: ${formatPersianInteger(entry.value)}',
-                ),
-              ),
-            )
-            .toList(),
-      ),
-    );
-  }
 }
 
 class _CustomerEditorDialog extends StatefulWidget {
@@ -584,6 +598,8 @@ class _CustomerEditorDialog extends StatefulWidget {
   @override
   State<_CustomerEditorDialog> createState() => _CustomerEditorDialogState();
 }
+
+enum _CustomerOptionKind { activity, status, priority }
 
 class _CustomerEditorDialogState extends State<_CustomerEditorDialog> {
   final _formKey = GlobalKey<FormState>();
@@ -878,9 +894,10 @@ class _CustomerEditorDialogState extends State<_CustomerEditorDialog> {
                     decoration: InputDecoration(
                       labelText: 'نوع فعالیت',
                       suffixIcon: IconButton(
-                        tooltip: 'افزودن نوع فعالیت',
-                        onPressed: () => _addOption(activity: true),
-                        icon: const Icon(Icons.add_circle_outline),
+                        tooltip: 'مدیریت نوع فعالیت',
+                        onPressed: () =>
+                            _manageOptions(_CustomerOptionKind.activity),
+                        icon: const Icon(Icons.edit_note_rounded),
                       ),
                     ),
                     items: {...widget.store.activityTypes, _activity}
@@ -903,9 +920,10 @@ class _CustomerEditorDialogState extends State<_CustomerEditorDialog> {
                     decoration: InputDecoration(
                       labelText: 'وضعیت مشتری',
                       suffixIcon: IconButton(
-                        tooltip: 'افزودن وضعیت مشتری',
-                        onPressed: () => _addOption(activity: false),
-                        icon: const Icon(Icons.add_circle_outline),
+                        tooltip: 'مدیریت وضعیت مشتری',
+                        onPressed: () =>
+                            _manageOptions(_CustomerOptionKind.status),
+                        icon: const Icon(Icons.edit_note_rounded),
                       ),
                     ),
                     items: {...widget.store.customerStatuses, _status}
@@ -924,16 +942,21 @@ class _CustomerEditorDialogState extends State<_CustomerEditorDialog> {
                 _wideField(
                   DropdownButtonFormField<String>(
                     initialValue: _priority,
-                    decoration: const InputDecoration(labelText: 'اولویت'),
-                    items: const [
-                      DropdownMenuItem(
-                        value: 'خیلی بالا',
-                        child: Text('خیلی بالا'),
+                    decoration: InputDecoration(
+                      labelText: 'اولویت',
+                      suffixIcon: IconButton(
+                        tooltip: 'مدیریت اولویت‌ها',
+                        onPressed: () =>
+                            _manageOptions(_CustomerOptionKind.priority),
+                        icon: const Icon(Icons.edit_note_rounded),
                       ),
-                      DropdownMenuItem(value: 'بالا', child: Text('بالا')),
-                      DropdownMenuItem(value: 'متوسط', child: Text('متوسط')),
-                      DropdownMenuItem(value: 'پایین', child: Text('پایین')),
-                    ],
+                    ),
+                    items: {...widget.store.customerPriorities, _priority}
+                        .map(
+                          (item) =>
+                              DropdownMenuItem(value: item, child: Text(item)),
+                        )
+                        .toList(),
                     onChanged: (value) {
                       setState(() {
                         _priority = value ?? _priority;
@@ -1087,40 +1110,201 @@ class _CustomerEditorDialogState extends State<_CustomerEditorDialog> {
 
   Widget _wideField(Widget child) => child;
 
-  Future<void> _addOption({required bool activity}) async {
-    final controller = TextEditingController();
+  Future<void> _manageOptions(_CustomerOptionKind kind) async {
+    var items = switch (kind) {
+      _CustomerOptionKind.activity => [...widget.store.activityTypes],
+      _CustomerOptionKind.status => [...widget.store.customerStatuses],
+      _CustomerOptionKind.priority => [...widget.store.customerPriorities],
+    };
+    final label = switch (kind) {
+      _CustomerOptionKind.activity => 'نوع فعالیت',
+      _CustomerOptionKind.status => 'وضعیت مشتری',
+      _CustomerOptionKind.priority => 'اولویت',
+    };
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: Text('مدیریت $label'),
+          content: SizedBox(
+            width: 460,
+            height: 420,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                FilledButton.tonalIcon(
+                  onPressed: () async {
+                    final value = await _promptOption('افزودن $label');
+                    if (value == null || value.trim().isEmpty) return;
+                    await _addManagedOption(kind, value);
+                    setDialogState(
+                      () => items = switch (kind) {
+                        _CustomerOptionKind.activity => [
+                          ...widget.store.activityTypes,
+                        ],
+                        _CustomerOptionKind.status => [
+                          ...widget.store.customerStatuses,
+                        ],
+                        _CustomerOptionKind.priority => [
+                          ...widget.store.customerPriorities,
+                        ],
+                      },
+                    );
+                    if (mounted) _selectOption(kind, value.trim());
+                  },
+                  icon: const Icon(Icons.add_rounded),
+                  label: Text('افزودن $label'),
+                ),
+                const SizedBox(height: 10),
+                Expanded(
+                  child: ListView.separated(
+                    itemCount: items.length,
+                    separatorBuilder: (_, _) => const Divider(height: 1),
+                    itemBuilder: (context, index) {
+                      final item = items[index];
+                      return ListTile(
+                        title: Text(item),
+                        trailing: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            IconButton(
+                              tooltip: 'ویرایش',
+                              onPressed: () async {
+                                final value = await _promptOption(
+                                  'ویرایش $label',
+                                  initialValue: item,
+                                );
+                                if (value == null || value.trim().isEmpty) {
+                                  return;
+                                }
+                                await _renameManagedOption(kind, item, value);
+                                setDialogState(() {
+                                  items[index] = value.trim();
+                                });
+                                if (mounted && _selectedOption(kind) == item) {
+                                  _selectOption(kind, value.trim());
+                                }
+                              },
+                              icon: const Icon(Icons.edit_outlined),
+                            ),
+                            IconButton(
+                              tooltip: 'حذف',
+                              onPressed: items.length <= 1
+                                  ? null
+                                  : () async {
+                                      await _removeManagedOption(kind, item);
+                                      setDialogState(
+                                        () => items.removeAt(index),
+                                      );
+                                      if (mounted &&
+                                          _selectedOption(kind) == item) {
+                                        _selectOption(kind, items.first);
+                                      }
+                                    },
+                              icon: const Icon(Icons.delete_outline_rounded),
+                            ),
+                          ],
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('بستن'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<String?> _promptOption(
+    String title, {
+    String initialValue = '',
+  }) async {
+    final controller = TextEditingController(text: initialValue);
     final value = await showDialog<String>(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text(activity ? 'نوع فعالیت جدید' : 'وضعیت مشتری جدید'),
+        title: Text(title),
         content: TextField(
           controller: controller,
           autofocus: true,
           decoration: const InputDecoration(labelText: 'عنوان'),
-          onSubmitted: (value) => Navigator.of(context).pop(value),
+          onSubmitted: (value) => Navigator.pop(context, value),
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.of(context).pop(),
+            onPressed: () => Navigator.pop(context),
             child: const Text('انصراف'),
           ),
           FilledButton(
-            onPressed: () => Navigator.of(context).pop(controller.text),
-            child: const Text('افزودن'),
+            onPressed: () => Navigator.pop(context, controller.text),
+            child: const Text('ذخیره'),
           ),
         ],
       ),
     );
     controller.dispose();
-    if (value == null || value.trim().isEmpty) return;
-    if (activity) {
-      await widget.store.addActivityType(value);
-      setState(() => _activity = value.trim());
-    } else {
-      await widget.store.addCustomerStatus(value);
-      setState(() => _status = value.trim());
-    }
+    return value;
   }
+
+  String _selectedOption(_CustomerOptionKind kind) => switch (kind) {
+    _CustomerOptionKind.activity => _activity,
+    _CustomerOptionKind.status => _status,
+    _CustomerOptionKind.priority => _priority,
+  };
+
+  void _selectOption(_CustomerOptionKind kind, String value) => setState(() {
+    switch (kind) {
+      case _CustomerOptionKind.activity:
+        _activity = value;
+      case _CustomerOptionKind.status:
+        _status = value;
+      case _CustomerOptionKind.priority:
+        _priority = value;
+    }
+  });
+
+  Future<void> _addManagedOption(_CustomerOptionKind kind, String value) =>
+      switch (kind) {
+        _CustomerOptionKind.activity => widget.store.addActivityType(value),
+        _CustomerOptionKind.status => widget.store.addCustomerStatus(value),
+        _CustomerOptionKind.priority => widget.store.addCustomerPriority(value),
+      };
+
+  Future<void> _renameManagedOption(
+    _CustomerOptionKind kind,
+    String oldValue,
+    String newValue,
+  ) => switch (kind) {
+    _CustomerOptionKind.activity => widget.store.renameActivityType(
+      oldValue,
+      newValue,
+    ),
+    _CustomerOptionKind.status => widget.store.renameCustomerStatus(
+      oldValue,
+      newValue,
+    ),
+    _CustomerOptionKind.priority => widget.store.renameCustomerPriority(
+      oldValue,
+      newValue,
+    ),
+  };
+
+  Future<void> _removeManagedOption(_CustomerOptionKind kind, String value) =>
+      switch (kind) {
+        _CustomerOptionKind.activity => widget.store.removeActivityType(value),
+        _CustomerOptionKind.status => widget.store.removeCustomerStatus(value),
+        _CustomerOptionKind.priority => widget.store.removeCustomerPriority(
+          value,
+        ),
+      };
 
   Widget _input(TextEditingController controller, Widget child) {
     return _wideField(AutoInputDirection(controller: controller, child: child));

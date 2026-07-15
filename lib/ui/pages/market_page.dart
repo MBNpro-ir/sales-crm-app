@@ -190,42 +190,46 @@ class _MarketPageState extends State<MarketPage> {
                   message:
                       'برای مشتریان جدید اولویت و وضعیت ارتباط را ثبت کنید.',
                 )
-              : CrmTableScroll(
-                  child: DataTable(
-                    headingRowColor: WidgetStatePropertyAll(
-                      Theme.of(context).colorScheme.surfaceContainerHighest,
+              : CrmConfigurableDataTable<CrmCustomer>(
+                  tableId: 'market_potential_customers',
+                  rows: potentialCustomers,
+                  initialSortColumnId: 'priority',
+                  columns: [
+                    CrmTableColumn(
+                      id: 'customer',
+                      label: 'مشتری',
+                      value: _customerLabel,
                     ),
-                    columns: const [
-                      DataColumn(label: Text('مشتری')),
-                      DataColumn(label: Text('استان / شهر')),
-                      DataColumn(label: Text('منبع جذب')),
-                      DataColumn(label: Text('وضعیت')),
-                      DataColumn(label: Text('اولویت')),
-                      DataColumn(label: Text('کالای مورد علاقه')),
-                    ],
-                    rows: potentialCustomers.map((customer) {
-                      return DataRow(
-                        cells: [
-                          DataCell(Text(_customerLabel(customer))),
-                          DataCell(
-                            Text('${customer.province} / ${customer.city}'),
-                          ),
-                          DataCell(Text(customer.details['source'] ?? '—')),
-                          DataCell(StatusPill(label: customer.status)),
-                          DataCell(Text(customer.priority)),
-                          DataCell(
-                            SizedBox(
-                              width: 180,
-                              child: Text(
-                                customer.details['interested_products'] ?? '—',
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                          ),
-                        ],
-                      );
-                    }).toList(),
-                  ),
+                    CrmTableColumn(
+                      id: 'location',
+                      label: 'استان / شهر',
+                      value: (customer) =>
+                          '${customer.province} / ${customer.city}',
+                    ),
+                    CrmTableColumn(
+                      id: 'source',
+                      label: 'منبع جذب',
+                      value: (customer) => customer.details['source'] ?? '—',
+                    ),
+                    CrmTableColumn(
+                      id: 'status',
+                      label: 'وضعیت',
+                      value: (customer) => customer.status,
+                      cell: (context, customer) =>
+                          StatusPill(label: customer.status),
+                    ),
+                    CrmTableColumn(
+                      id: 'priority',
+                      label: 'اولویت',
+                      value: (customer) => customer.priority,
+                    ),
+                    CrmTableColumn(
+                      id: 'products',
+                      label: 'کالای مورد علاقه',
+                      value: (customer) =>
+                          customer.details['interested_products'] ?? '—',
+                    ),
+                  ],
                 ),
         ),
       ],

@@ -210,6 +210,8 @@ class CrmCall {
     this.productName = '',
     this.quantity = 0,
     this.unitPrice = 0,
+    this.discountAmount = 0,
+    this.taxPercent = 0,
     this.deleted = false,
   });
 
@@ -230,7 +232,17 @@ class CrmCall {
   final String productName;
   final int quantity;
   final int unitPrice;
+  final int discountAmount;
+  final int taxPercent;
   final bool deleted;
+
+  int get subtotal =>
+      quantity > 0 && unitPrice > 0 ? quantity * unitPrice : amount;
+  int get netAmount => (subtotal - discountAmount).clamp(0, 1 << 62);
+  int get taxAmount => (netAmount * taxPercent / 100).round();
+  int get totalAmount => netAmount + taxAmount;
+  bool get hasTradeOutcome =>
+      status == 'موفق' && {'خرید', 'فروش'}.contains(tradeType);
 
   Map<String, dynamic> toJson() {
     return {
@@ -249,6 +261,8 @@ class CrmCall {
       'product_name': productName,
       'quantity': quantity,
       'unit_price': unitPrice,
+      'discount_amount': discountAmount,
+      'tax_percent': taxPercent,
       'next_follow_up': nextFollowUp?.toUtc().toIso8601String(),
       'updated_at': updatedAt.toUtc().toIso8601String(),
       'deleted': deleted,
@@ -272,6 +286,8 @@ class CrmCall {
       'product_name': productName,
       'quantity': quantity,
       'unit_price': unitPrice,
+      'discount_amount': discountAmount,
+      'tax_percent': taxPercent,
       'next_follow_up': nextFollowUp?.toUtc().toIso8601String(),
       'updated_at': updatedAt.toUtc().toIso8601String(),
       'is_deleted': deleted ? 1 : 0,
@@ -295,6 +311,8 @@ class CrmCall {
       productName: _text(value['product_name']),
       quantity: _number(value['quantity']),
       unitPrice: _number(value['unit_price']),
+      discountAmount: _number(value['discount_amount']),
+      taxPercent: _number(value['tax_percent']),
       nextFollowUp: _nullableDate(value['next_follow_up']),
       updatedAt: _date(value['updated_at']),
       deleted: value['deleted'] == true || value['is_deleted'] == 1,
@@ -318,6 +336,8 @@ class CrmCall {
       productName: _text(value['product_name']),
       quantity: _number(value['quantity']),
       unitPrice: _number(value['unit_price']),
+      discountAmount: _number(value['discount_amount']),
+      taxPercent: _number(value['tax_percent']),
       nextFollowUp: _nullableDate(value['next_follow_up']),
       updatedAt: _date(value['updated_at']),
       deleted: _number(value['is_deleted']) == 1,
@@ -405,6 +425,9 @@ class CrmOpportunity {
     required this.updatedAt,
     this.expectedClose,
     this.tradeType = 'فروش',
+    this.productName = '',
+    this.province = '',
+    this.city = '',
     this.deleted = false,
   });
 
@@ -418,6 +441,9 @@ class CrmOpportunity {
   final String notes;
   final String ownerName;
   final String tradeType;
+  final String productName;
+  final String province;
+  final String city;
   final DateTime? expectedClose;
   final DateTime updatedAt;
   final bool deleted;
@@ -436,6 +462,9 @@ class CrmOpportunity {
       'notes': notes,
       'owner_name': ownerName,
       'trade_type': tradeType,
+      'product_name': productName,
+      'province': province,
+      'city': city,
       'expected_close': expectedClose?.toUtc().toIso8601String(),
       'updated_at': updatedAt.toUtc().toIso8601String(),
       'deleted': deleted,
@@ -456,6 +485,9 @@ class CrmOpportunity {
       tradeType: _text(value['trade_type']).isEmpty
           ? 'فروش'
           : _text(value['trade_type']),
+      productName: _text(value['product_name']),
+      province: _text(value['province']),
+      city: _text(value['city']),
       expectedClose: _nullableDate(value['expected_close']),
       updatedAt: _date(value['updated_at']),
       deleted: value['deleted'] == true || value['is_deleted'] == 1,
