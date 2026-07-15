@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -40,6 +42,8 @@ class CrmStore extends ChangeNotifier {
   List<CrmTask> _tasks = const [];
   List<CrmQuote> _quotes = const [];
   List<CrmOrder> _orders = const [];
+  List<CrmAttachment> _attachments = const [];
+  List<CrmAuditEntry> _auditEntries = const [];
   List<String> _activityTypes = const [
     'تولیدکننده',
     'مصرف‌کننده',
@@ -75,6 +79,7 @@ class CrmStore extends ChangeNotifier {
   String? _accessToken;
   String? _organizationId;
   String _userName = 'کاربر آفلاین';
+  String _userPreferenceId = 'offline';
   String _organizationName = 'فضای کاری من';
   int _pendingOutboxCount = 0;
   Timer? _sessionGuard;
@@ -98,6 +103,8 @@ class CrmStore extends ChangeNotifier {
   List<CrmTask> get tasks => List.unmodifiable(_tasks);
   List<CrmQuote> get quotes => List.unmodifiable(_quotes);
   List<CrmOrder> get orders => List.unmodifiable(_orders);
+  List<CrmAttachment> get attachments => List.unmodifiable(_attachments);
+  List<CrmAuditEntry> get auditEntries => List.unmodifiable(_auditEntries);
   List<String> get activityTypes => List.unmodifiable(_activityTypes);
   List<String> get customerStatuses => List.unmodifiable(_customerStatuses);
   List<String> get customerPriorities => List.unmodifiable(_customerPriorities);
@@ -187,8 +194,11 @@ class CrmStore extends ChangeNotifier {
     _api.accessToken = _accessToken;
     _organizationId = _preferences!.getString('organization_id');
     _userName = _preferences!.getString('user_name') ?? _userName;
+    _userPreferenceId =
+        _preferences!.getString('user_preference_id') ?? _userName;
     _organizationName =
         _preferences!.getString('organization_name') ?? _organizationName;
+    await _setActivePreferenceScope();
     _activityTypes = _savedOptions('activity_types', _activityTypes);
     _customerStatuses = _savedOptions('customer_statuses', _customerStatuses);
     _customerPriorities = _savedOptions(
@@ -228,6 +238,8 @@ class CrmStore extends ChangeNotifier {
     _tasks = await _database.tasks();
     _quotes = await _database.quotes();
     _orders = await _database.orders();
+    _attachments = await _database.attachments();
+    _auditEntries = await _database.auditEntries();
     _pendingOutboxCount = (await _database.pendingChanges()).length;
     notifyListeners();
   }
@@ -396,11 +408,17 @@ class CrmStore extends ChangeNotifier {
         _ => item.priority == oldValue,
       },
     )) {
-      await _database.saveCustomer(
-        updateCustomer(
-          customer,
-          normalized,
-        ).copyWith(updatedAt: DateTime.now()),
+      final updated = updateCustomer(
+        customer,
+        normalized,
+      ).copyWith(updatedAt: DateTime.now());
+      await _database.saveCustomer(updated);
+      await _recordAudit(
+        entityType: 'customer',
+        entityId: customer.id,
+        action: 'ویرایش گزینه $oldValue به $normalized',
+        oldValue: customer.toJson(),
+        newValue: updated.toJson(),
       );
       changed = true;
     }
@@ -463,11 +481,17 @@ class CrmStore extends ChangeNotifier {
         _ => item.priority == value,
       },
     )) {
-      await _database.saveCustomer(
-        updateCustomer(
-          customer,
-          replacement,
-        ).copyWith(updatedAt: DateTime.now()),
+      final updated = updateCustomer(
+        customer,
+        replacement,
+      ).copyWith(updatedAt: DateTime.now());
+      await _database.saveCustomer(updated);
+      await _recordAudit(
+        entityType: 'customer',
+        entityId: customer.id,
+        action: 'حذف گزینه $value و جایگزینی با $replacement',
+        oldValue: customer.toJson(),
+        newValue: updated.toJson(),
       );
       changed = true;
     }
@@ -499,15 +523,18 @@ class CrmStore extends ChangeNotifier {
       _accessToken = session.accessToken;
       _api.accessToken = session.accessToken;
       _userName = session.userName;
+      _userPreferenceId = identifier.trim().toLowerCase();
       _organizationId = session.organizationId;
       _organizationName = session.organizationName;
       await _preferences?.setString('access_token', session.accessToken);
       await _preferences?.setString('user_name', session.userName);
+      await _preferences?.setString('user_preference_id', _userPreferenceId);
       await _preferences?.setString('organization_id', session.organizationId);
       await _preferences?.setString(
         'organization_name',
         session.organizationName,
       );
+      await _setActivePreferenceScope();
       await sync(silent: true);
       if (!hasSession) {
         return 'دسترسی این حساب در سرور غیرفعال شده است.';
@@ -603,6 +630,13 @@ class CrmStore extends ChangeNotifier {
       updatedAt: DateTime.now(),
     );
     await _database.saveCustomer(customer);
+    await _recordAudit(
+      entityType: 'customer',
+      entityId: customer.id,
+      action: id == null ? 'ایجاد' : 'ویرایش',
+      oldValue: _customers.where((item) => item.id == id).firstOrNull?.toJson(),
+      newValue: customer.toJson(),
+    );
     await _afterLocalMutation();
   }
 
@@ -649,33 +683,39 @@ class CrmStore extends ChangeNotifier {
         'email': (row['email'] ?? '').trim(),
         'address': (row['address'] ?? '').trim(),
       };
-      await _database.saveCustomer(
-        CrmCustomer(
-          id: current?.id ?? _uuid.v4(),
-          name: name.isEmpty ? company : name,
-          company: company,
-          mobile: mobile,
-          phone: (row['phone'] ?? '').trim(),
-          province: (row['province'] ?? '').trim(),
-          city: (row['city'] ?? '').trim(),
-          activityType: (row['activity_type'] ?? '').trim().isEmpty
-              ? 'سایر'
-              : (row['activity_type'] ?? '').trim(),
-          status: (row['status'] ?? '').trim().isEmpty
-              ? 'فعال'
-              : (row['status'] ?? '').trim(),
-          priority: (row['priority'] ?? '').trim().isEmpty
-              ? 'متوسط'
-              : (row['priority'] ?? '').trim(),
-          notes: (row['notes'] ?? '').trim(),
-          tags: (row['tags'] ?? '')
-              .split(',')
-              .map((item) => item.trim())
-              .where((item) => item.isNotEmpty)
-              .toList(),
-          details: details,
-          updatedAt: DateTime.now(),
-        ),
+      final importedCustomer = CrmCustomer(
+        id: current?.id ?? _uuid.v4(),
+        name: name.isEmpty ? company : name,
+        company: company,
+        mobile: mobile,
+        phone: (row['phone'] ?? '').trim(),
+        province: (row['province'] ?? '').trim(),
+        city: (row['city'] ?? '').trim(),
+        activityType: (row['activity_type'] ?? '').trim().isEmpty
+            ? 'سایر'
+            : (row['activity_type'] ?? '').trim(),
+        status: (row['status'] ?? '').trim().isEmpty
+            ? 'فعال'
+            : (row['status'] ?? '').trim(),
+        priority: (row['priority'] ?? '').trim().isEmpty
+            ? 'متوسط'
+            : (row['priority'] ?? '').trim(),
+        notes: (row['notes'] ?? '').trim(),
+        tags: (row['tags'] ?? '')
+            .split(',')
+            .map((item) => item.trim())
+            .where((item) => item.isNotEmpty)
+            .toList(),
+        details: details,
+        updatedAt: DateTime.now(),
+      );
+      await _database.saveCustomer(importedCustomer);
+      await _recordAudit(
+        entityType: 'customer',
+        entityId: importedCustomer.id,
+        action: current == null ? 'ورود از اکسل' : 'به‌روزرسانی از اکسل',
+        oldValue: current?.toJson(),
+        newValue: importedCustomer.toJson(),
       );
       imported++;
     }
@@ -701,38 +741,43 @@ class CrmStore extends ChangeNotifier {
       if (subject.isEmpty) continue;
       final rawDate = (row['call_at'] ?? '').trim();
       final callAt = DateTime.tryParse(rawDate)?.toLocal() ?? DateTime.now();
-      await _database.saveCall(
-        CrmCall(
-          id: (row['id'] ?? '').trim().isEmpty
-              ? _uuid.v4()
-              : (row['id'] ?? '').trim(),
-          customerId: customer.id,
-          customerName: customer.displayName,
-          subject: subject,
-          type: (row['type'] ?? '').trim().isEmpty
-              ? 'تلفنی'
-              : (row['type'] ?? '').trim(),
-          direction: (row['direction'] ?? '').trim().isEmpty
-              ? 'خروجی'
-              : (row['direction'] ?? '').trim(),
-          status: (row['status'] ?? '').trim().isEmpty
-              ? 'پیگیری'
-              : (row['status'] ?? '').trim(),
-          notes: (row['notes'] ?? '').trim(),
-          callAt: callAt,
-          durationMinutes: parsePersianInt(row['duration_minutes'] ?? ''),
-          amount: parsePersianInt(row['amount'] ?? ''),
-          tradeType: (row['trade_type'] ?? '').trim(),
-          productName: (row['product_name'] ?? '').trim(),
-          quantity: parsePersianInt(row['quantity'] ?? ''),
-          unitPrice: parsePersianInt(row['unit_price'] ?? ''),
-          discountAmount: parsePersianInt(row['discount_amount'] ?? ''),
-          taxPercent: parsePersianInt(row['tax_percent'] ?? ''),
-          nextFollowUp: DateTime.tryParse(
-            (row['next_follow_up'] ?? '').trim(),
-          )?.toLocal(),
-          updatedAt: DateTime.now(),
-        ),
+      final importedCall = CrmCall(
+        id: (row['id'] ?? '').trim().isEmpty
+            ? _uuid.v4()
+            : (row['id'] ?? '').trim(),
+        customerId: customer.id,
+        customerName: customer.displayName,
+        subject: subject,
+        type: (row['type'] ?? '').trim().isEmpty
+            ? 'تلفنی'
+            : (row['type'] ?? '').trim(),
+        direction: (row['direction'] ?? '').trim().isEmpty
+            ? 'خروجی'
+            : (row['direction'] ?? '').trim(),
+        status: (row['status'] ?? '').trim().isEmpty
+            ? 'پیگیری'
+            : (row['status'] ?? '').trim(),
+        notes: (row['notes'] ?? '').trim(),
+        callAt: callAt,
+        durationMinutes: parsePersianInt(row['duration_minutes'] ?? ''),
+        amount: parsePersianInt(row['amount'] ?? ''),
+        tradeType: (row['trade_type'] ?? '').trim(),
+        productName: (row['product_name'] ?? '').trim(),
+        quantity: parsePersianInt(row['quantity'] ?? ''),
+        unitPrice: parsePersianInt(row['unit_price'] ?? ''),
+        discountAmount: parsePersianInt(row['discount_amount'] ?? ''),
+        taxPercent: parsePersianInt(row['tax_percent'] ?? ''),
+        nextFollowUp: DateTime.tryParse(
+          (row['next_follow_up'] ?? '').trim(),
+        )?.toLocal(),
+        updatedAt: DateTime.now(),
+      );
+      await _database.saveCall(importedCall);
+      await _recordAudit(
+        entityType: 'call',
+        entityId: importedCall.id,
+        action: 'ورود از اکسل',
+        newValue: importedCall.toJson(),
       );
       imported++;
     }
@@ -791,10 +836,17 @@ class CrmStore extends ChangeNotifier {
       updatedAt: now,
     );
     await _database.saveCall(call);
+    await _recordAudit(
+      entityType: 'call',
+      entityId: call.id,
+      action: id == null ? 'ایجاد' : 'ویرایش',
+      oldValue: _calls.where((item) => item.id == id).firstOrNull?.toJson(),
+      newValue: call.toJson(),
+    );
     await _afterLocalMutation();
   }
 
-  Future<void> saveProduct({
+  Future<CrmProduct> saveProduct({
     required String name,
     required String sku,
     required String category,
@@ -820,7 +872,15 @@ class CrmStore extends ChangeNotifier {
       updatedAt: DateTime.now(),
     );
     await _database.saveProduct(product);
+    await _recordAudit(
+      entityType: 'product',
+      entityId: product.id,
+      action: id == null ? 'ایجاد' : 'ویرایش',
+      oldValue: _products.where((item) => item.id == id).firstOrNull?.toJson(),
+      newValue: product.toJson(),
+    );
     await _afterLocalMutation();
+    return product;
   }
 
   Future<void> saveOpportunity({
@@ -855,6 +915,16 @@ class CrmStore extends ChangeNotifier {
       updatedAt: DateTime.now(),
     );
     await _database.saveOpportunity(opportunity);
+    await _recordAudit(
+      entityType: 'opportunity',
+      entityId: opportunity.id,
+      action: id == null ? 'ایجاد' : 'ویرایش',
+      oldValue: _opportunities
+          .where((item) => item.id == id)
+          .firstOrNull
+          ?.toJson(),
+      newValue: opportunity.toJson(),
+    );
     await _afterLocalMutation();
   }
 
@@ -882,6 +952,13 @@ class CrmStore extends ChangeNotifier {
       updatedAt: DateTime.now(),
     );
     await _database.saveTask(task);
+    await _recordAudit(
+      entityType: 'task',
+      entityId: task.id,
+      action: id == null ? 'ایجاد' : 'ویرایش',
+      oldValue: _tasks.where((item) => item.id == id).firstOrNull?.toJson(),
+      newValue: task.toJson(),
+    );
     await _afterLocalMutation();
   }
 
@@ -900,6 +977,13 @@ class CrmStore extends ChangeNotifier {
       updatedAt: DateTime.now(),
     );
     await _database.saveTask(completed);
+    await _recordAudit(
+      entityType: 'task',
+      entityId: completed.id,
+      action: 'تغییر وضعیت',
+      oldValue: task.toJson(),
+      newValue: completed.toJson(),
+    );
     await _afterLocalMutation();
   }
 
@@ -929,6 +1013,13 @@ class CrmStore extends ChangeNotifier {
       updatedAt: now,
     );
     await _database.saveQuote(quote);
+    await _recordAudit(
+      entityType: 'quote',
+      entityId: quote.id,
+      action: id == null ? 'ایجاد' : 'ویرایش',
+      oldValue: _quotes.where((item) => item.id == id).firstOrNull?.toJson(),
+      newValue: quote.toJson(),
+    );
     await _afterLocalMutation();
   }
 
@@ -962,12 +1053,113 @@ class CrmStore extends ChangeNotifier {
       updatedAt: now,
     );
     await _database.saveOrder(order);
+    await _recordAudit(
+      entityType: 'order',
+      entityId: order.id,
+      action: id == null ? 'ایجاد' : 'ویرایش',
+      oldValue: _orders.where((item) => item.id == id).firstOrNull?.toJson(),
+      newValue: order.toJson(),
+    );
     await _afterLocalMutation();
+  }
+
+  List<CrmAttachment> attachmentsFor(String entityType, String entityId) {
+    return _attachments
+        .where(
+          (item) => item.entityType == entityType && item.entityId == entityId,
+        )
+        .toList()
+      ..sort((left, right) => right.updatedAt.compareTo(left.updatedAt));
+  }
+
+  List<CrmAuditEntry> auditFor(String entityType, String entityId) {
+    return _auditEntries
+        .where(
+          (item) => item.entityType == entityType && item.entityId == entityId,
+        )
+        .toList()
+      ..sort((left, right) => right.updatedAt.compareTo(left.updatedAt));
+  }
+
+  Future<void> addAttachment({
+    required String entityType,
+    required String entityId,
+    required String fileName,
+    required String extension,
+    required Uint8List bytes,
+  }) async {
+    const maximumBytes = 15 * 1024 * 1024;
+    if (bytes.length > maximumBytes) {
+      throw const FormatException('حداکثر حجم هر فایل پیوست ۱۵ مگابایت است.');
+    }
+    final now = DateTime.now();
+    final attachment = CrmAttachment(
+      id: _uuid.v4(),
+      entityType: entityType,
+      entityId: entityId,
+      fileName: fileName,
+      extension: extension.toLowerCase(),
+      sizeBytes: bytes.length,
+      contentBase64: base64Encode(bytes),
+      uploadedBy: _userName,
+      updatedAt: now,
+    );
+    await _database.saveAttachment(attachment);
+    await _recordAudit(
+      entityType: entityType,
+      entityId: entityId,
+      action: 'افزودن پیوست',
+      newValue: {'file_name': fileName, 'size_bytes': bytes.length},
+    );
+    await _afterLocalMutation();
+  }
+
+  Future<void> deleteAttachment(CrmAttachment attachment) async {
+    await _database.saveAttachment(
+      attachment.copyWith(updatedAt: DateTime.now(), deleted: true),
+    );
+    await _recordAudit(
+      entityType: attachment.entityType,
+      entityId: attachment.entityId,
+      action: 'حذف پیوست',
+      oldValue: {
+        'file_name': attachment.fileName,
+        'size_bytes': attachment.sizeBytes,
+      },
+    );
+    await _afterLocalMutation();
+  }
+
+  Future<void> _recordAudit({
+    required String entityType,
+    required String entityId,
+    required String action,
+    Map<String, dynamic>? oldValue,
+    Map<String, dynamic>? newValue,
+  }) {
+    return _database.saveAuditEntry(
+      CrmAuditEntry(
+        id: _uuid.v4(),
+        entityType: entityType,
+        entityId: entityId,
+        action: action,
+        userName: _userName,
+        oldValue: oldValue ?? const {},
+        newValue: newValue ?? const {},
+        updatedAt: DateTime.now(),
+      ),
+    );
   }
 
   Future<void> deleteCustomer(CrmCustomer item) async {
     await _database.saveCustomer(
       item.copyWith(deleted: true, updatedAt: DateTime.now()),
+    );
+    await _recordAudit(
+      entityType: 'customer',
+      entityId: item.id,
+      action: 'حذف',
+      oldValue: item.toJson(),
     );
     await _afterLocalMutation();
   }
@@ -997,6 +1189,12 @@ class CrmStore extends ChangeNotifier {
         deleted: true,
       ),
     );
+    await _recordAudit(
+      entityType: 'call',
+      entityId: item.id,
+      action: 'حذف',
+      oldValue: item.toJson(),
+    );
     await _afterLocalMutation();
   }
 
@@ -1016,6 +1214,12 @@ class CrmStore extends ChangeNotifier {
         updatedAt: DateTime.now(),
         deleted: true,
       ),
+    );
+    await _recordAudit(
+      entityType: 'product',
+      entityId: item.id,
+      action: 'حذف',
+      oldValue: item.toJson(),
     );
     await _afterLocalMutation();
   }
@@ -1041,6 +1245,12 @@ class CrmStore extends ChangeNotifier {
         deleted: true,
       ),
     );
+    await _recordAudit(
+      entityType: 'opportunity',
+      entityId: item.id,
+      action: 'حذف',
+      oldValue: item.toJson(),
+    );
     await _afterLocalMutation();
   }
 
@@ -1061,6 +1271,12 @@ class CrmStore extends ChangeNotifier {
         deleted: true,
       ),
     );
+    await _recordAudit(
+      entityType: 'task',
+      entityId: item.id,
+      action: 'حذف',
+      oldValue: item.toJson(),
+    );
     await _afterLocalMutation();
   }
 
@@ -1080,6 +1296,12 @@ class CrmStore extends ChangeNotifier {
         updatedAt: DateTime.now(),
         deleted: true,
       ),
+    );
+    await _recordAudit(
+      entityType: 'quote',
+      entityId: item.id,
+      action: 'حذف',
+      oldValue: item.toJson(),
     );
     await _afterLocalMutation();
   }
@@ -1102,6 +1324,12 @@ class CrmStore extends ChangeNotifier {
         updatedAt: DateTime.now(),
         deleted: true,
       ),
+    );
+    await _recordAudit(
+      entityType: 'order',
+      entityId: item.id,
+      action: 'حذف',
+      oldValue: item.toJson(),
     );
     await _afterLocalMutation();
   }
@@ -1143,6 +1371,7 @@ class CrmStore extends ChangeNotifier {
         'organization_name',
         session.organizationName,
       );
+      await _setActivePreferenceScope();
     } on ApiException catch (error) {
       if (error.isUnauthorized) {
         await _endSession(
@@ -1166,6 +1395,7 @@ class CrmStore extends ChangeNotifier {
     _api.accessToken = null;
     _organizationId = null;
     _userName = 'کاربر آفلاین';
+    _userPreferenceId = 'offline';
     _organizationName = 'فضای کاری من';
     _online = false;
     _syncing = false;
@@ -1173,8 +1403,10 @@ class CrmStore extends ChangeNotifier {
     if (notice != null) _sessionNotice = notice;
     await _preferences?.remove('access_token');
     await _preferences?.remove('user_name');
+    await _preferences?.remove('user_preference_id');
     await _preferences?.remove('organization_id');
     await _preferences?.remove('organization_name');
+    await _setActivePreferenceScope();
     if (clearWorkspace) await _database.clearWorkspace();
     _clearInMemory();
     notifyListeners();
@@ -1188,7 +1420,20 @@ class CrmStore extends ChangeNotifier {
     _tasks = const [];
     _quotes = const [];
     _orders = const [];
+    _attachments = const [];
+    _auditEntries = const [];
     _pendingOutboxCount = 0;
+  }
+
+  Future<void> _setActivePreferenceScope() async {
+    final organization = _organizationId ?? 'offline';
+    final user = _userPreferenceId.trim().isEmpty
+        ? 'offline'
+        : _userPreferenceId.trim();
+    await _preferences?.setString(
+      'crm_active_user_scope',
+      '$organization::$user',
+    );
   }
 
   String? takeSessionNotice() {

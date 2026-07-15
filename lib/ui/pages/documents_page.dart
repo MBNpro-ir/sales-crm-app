@@ -4,6 +4,7 @@ import '../../core/crm_store.dart';
 import '../../core/models.dart';
 import '../../core/report_service.dart';
 import '../widgets/common.dart';
+import '../widgets/entity_tools.dart';
 
 enum DocumentPageMode { quote, order }
 
@@ -255,7 +256,15 @@ class _DocumentsPageState extends State<DocumentsPage> {
             ),
           ],
         ),
-        const SizedBox(height: 20),
+        const SizedBox(height: 12),
+        CrmPageToolbar(
+          onNew: () => _openEditor(),
+          onReport: _printReport,
+          onRefresh: widget.store.refresh,
+          onSearch: () => setState(() {}),
+          onAdvancedFilter: () => setState(() {}),
+        ),
+        const SizedBox(height: 18),
         Wrap(
           spacing: 14,
           runSpacing: 14,
@@ -452,12 +461,49 @@ class _DocumentsPageState extends State<DocumentsPage> {
           value: (_) => '',
           canHide: false,
           filterable: false,
-          cell: (context, item) => _QuoteActions(
-            item: item,
-            onEdit: () => _openEditor(quote: item),
-            onDelete: () => _deleteQuote(item),
-            onPrint: () => _printQuote(item),
-            onStatus: (value) => _setQuoteStatus(item, value),
+          cell: (context, item) => PopupMenuButton<String>(
+            tooltip: 'عملیات پیش‌فاکتور',
+            onSelected: (value) {
+              if (value == 'view' || value == 'print') _printQuote(item);
+              if (value == 'edit') _openEditor(quote: item);
+              if (value == 'note') _openEditor(quote: item);
+              if (value == 'approve') _setQuoteStatus(item, 'تایید شده');
+              if (value == 'reject') _setQuoteStatus(item, 'رد شده');
+              if (value == 'attachments') {
+                showCrmAttachmentManager(
+                  context,
+                  store: widget.store,
+                  entityType: 'quote',
+                  entityId: item.id,
+                  title: item.quoteNumber,
+                );
+              }
+              if (value == 'history') {
+                showCrmAuditLog(
+                  context,
+                  store: widget.store,
+                  entityType: 'quote',
+                  entityId: item.id,
+                  title: item.quoteNumber,
+                );
+              }
+              if (value == 'delete') _deleteQuote(item);
+            },
+            itemBuilder: (context) => const [
+              PopupMenuItem(value: 'view', child: Text('مشاهده')),
+              PopupMenuItem(value: 'edit', child: Text('ویرایش')),
+              PopupMenuItem(value: 'note', child: Text('یادداشت')),
+              PopupMenuItem(value: 'print', child: Text('گزارش و چاپ')),
+              PopupMenuItem(value: 'approve', child: Text('تایید پیش‌فاکتور')),
+              PopupMenuItem(value: 'reject', child: Text('رد پیش‌فاکتور')),
+              PopupMenuItem(
+                value: 'attachments',
+                child: Text('فایل‌های پیوست'),
+              ),
+              PopupMenuItem(value: 'history', child: Text('تاریخچه')),
+              PopupMenuDivider(),
+              PopupMenuItem(value: 'delete', child: Text('حذف')),
+            ],
           ),
         ),
       ],
@@ -525,92 +571,58 @@ class _DocumentsPageState extends State<DocumentsPage> {
           value: (_) => '',
           canHide: false,
           filterable: false,
-          cell: (context, item) => _OrderActions(
-            item: item,
-            onEdit: () => _openEditor(order: item),
-            onDelete: () => _deleteOrder(item),
-            onPrint: () => _printOrder(item),
-            onStatus: (value) => _setOrderStatus(item, value),
+          cell: (context, item) => PopupMenuButton<String>(
+            tooltip: 'عملیات سفارش',
+            onSelected: (value) {
+              if (value == 'view' || value == 'print') _printOrder(item);
+              if (value == 'edit') _openEditor(order: item);
+              if (value == 'note') _openEditor(order: item);
+              if (value == 'approve') _setOrderStatus(item, 'تایید شده');
+              if (value == 'complete') _setOrderStatus(item, 'تکمیل شده');
+              if (value == 'invoice') _setOrderStatus(item, 'فاکتور صادر شد');
+              if (value == 'reject') _setOrderStatus(item, 'رد شده');
+              if (value == 'attachments') {
+                showCrmAttachmentManager(
+                  context,
+                  store: widget.store,
+                  entityType: 'order',
+                  entityId: item.id,
+                  title: item.orderNumber,
+                );
+              }
+              if (value == 'history') {
+                showCrmAuditLog(
+                  context,
+                  store: widget.store,
+                  entityType: 'order',
+                  entityId: item.id,
+                  title: item.orderNumber,
+                );
+              }
+              if (value == 'delete') _deleteOrder(item);
+            },
+            itemBuilder: (context) => const [
+              PopupMenuItem(value: 'view', child: Text('مشاهده')),
+              PopupMenuItem(value: 'edit', child: Text('ویرایش')),
+              PopupMenuItem(value: 'note', child: Text('یادداشت')),
+              PopupMenuItem(value: 'print', child: Text('گزارش و چاپ')),
+              PopupMenuItem(value: 'approve', child: Text('تایید سفارش')),
+              PopupMenuItem(value: 'complete', child: Text('سفارش انجام شد')),
+              PopupMenuItem(value: 'invoice', child: Text('صدور فاکتور')),
+              PopupMenuItem(value: 'reject', child: Text('رد سفارش')),
+              PopupMenuItem(
+                value: 'attachments',
+                child: Text('فایل‌های پیوست'),
+              ),
+              PopupMenuItem(value: 'history', child: Text('تاریخچه')),
+              PopupMenuDivider(),
+              PopupMenuItem(value: 'delete', child: Text('حذف')),
+            ],
           ),
         ),
       ],
     );
   }
-}
-
-class _QuoteActions extends StatelessWidget {
-  const _QuoteActions({
-    required this.item,
-    required this.onEdit,
-    required this.onDelete,
-    required this.onPrint,
-    required this.onStatus,
-  });
-
-  final CrmQuote item;
-  final VoidCallback onEdit;
-  final VoidCallback onDelete;
-  final VoidCallback onPrint;
-  final ValueChanged<String> onStatus;
-
-  @override
-  Widget build(BuildContext context) => Row(
-    mainAxisSize: MainAxisSize.min,
-    children: [
-      IconButton(
-        onPressed: onPrint,
-        tooltip: 'چاپ',
-        icon: const Icon(Icons.print_outlined),
-      ),
-      PopupMenuButton<String>(
-        tooltip: 'تایید یا رد',
-        onSelected: onStatus,
-        itemBuilder: (context) => const [
-          PopupMenuItem(value: 'تایید شده', child: Text('تایید پیش‌فاکتور')),
-          PopupMenuItem(value: 'رد شده', child: Text('رد پیش‌فاکتور')),
-        ],
-      ),
-      RecordActions(onEdit: onEdit, onDelete: onDelete),
-    ],
-  );
-}
-
-class _OrderActions extends StatelessWidget {
-  const _OrderActions({
-    required this.item,
-    required this.onEdit,
-    required this.onDelete,
-    required this.onPrint,
-    required this.onStatus,
-  });
-
-  final CrmOrder item;
-  final VoidCallback onEdit;
-  final VoidCallback onDelete;
-  final VoidCallback onPrint;
-  final ValueChanged<String> onStatus;
-
-  @override
-  Widget build(BuildContext context) => Row(
-    mainAxisSize: MainAxisSize.min,
-    children: [
-      IconButton(
-        onPressed: onPrint,
-        tooltip: 'چاپ',
-        icon: const Icon(Icons.print_outlined),
-      ),
-      PopupMenuButton<String>(
-        tooltip: 'تایید یا رد',
-        onSelected: onStatus,
-        itemBuilder: (context) => const [
-          PopupMenuItem(value: 'تایید شده', child: Text('تایید سفارش')),
-          PopupMenuItem(value: 'رد شده', child: Text('رد سفارش')),
-          PopupMenuItem(value: 'تکمیل شده', child: Text('سفارش انجام شد')),
-        ],
-      ),
-      RecordActions(onEdit: onEdit, onDelete: onDelete),
-    ],
-  );
 }
 
 class DocumentEditorDialog extends StatefulWidget {
@@ -875,46 +887,86 @@ class _DocumentEditorState extends State<DocumentEditorDialog> {
                         'کد کالا، شرح، مقدار، واحد، قیمت، تخفیف و مالیات را اضافه کنید.',
                   )
                 else
-                  CrmTableScroll(
-                    child: DataTable(
-                      columns: const [
-                        DataColumn(label: Text('کد')),
-                        DataColumn(label: Text('شرح')),
-                        DataColumn(label: Text('مقدار')),
-                        DataColumn(label: Text('واحد')),
-                        DataColumn(label: Text('مبلغ واحد')),
-                        DataColumn(label: Text('تخفیف')),
-                        DataColumn(label: Text('ارزش افزوده')),
-                        DataColumn(label: Text('مبلغ کل')),
-                        DataColumn(label: Text('عملیات')),
-                      ],
-                      rows: List.generate(_lines.length, (index) {
-                        final item = _lines[index];
-                        return DataRow(
-                          cells: [
-                            DataCell(Text(item.productCode)),
-                            DataCell(Text(item.description)),
-                            DataCell(Text(formatPersianInteger(item.quantity))),
-                            DataCell(Text(item.unit)),
-                            DataCell(Text(compactMoney(item.unitPrice))),
-                            DataCell(
-                              Text(
-                                '${formatPersianInteger(item.discountPercent)}٪',
-                              ),
-                            ),
-                            DataCell(Text(compactMoney(item.taxAmount))),
-                            DataCell(Text(compactMoney(item.totalAmount))),
-                            DataCell(
-                              RecordActions(
-                                onEdit: () => _editLine(index),
-                                onDelete: () =>
-                                    setState(() => _lines.removeAt(index)),
-                              ),
-                            ),
+                  CrmConfigurableDataTable<CrmDocumentLine>(
+                    tableId: _isQuote
+                        ? 'quote_editor_lines'
+                        : 'order_editor_lines',
+                    rows: _lines,
+                    columns: [
+                      CrmTableColumn(
+                        id: 'code',
+                        label: 'کد',
+                        value: (item) => item.productCode,
+                      ),
+                      CrmTableColumn(
+                        id: 'description',
+                        label: 'شرح',
+                        value: (item) => item.description,
+                      ),
+                      CrmTableColumn(
+                        id: 'quantity',
+                        label: 'مقدار',
+                        value: (item) => formatPersianInteger(item.quantity),
+                        sortValue: (item) => item.quantity,
+                        numeric: true,
+                      ),
+                      CrmTableColumn(
+                        id: 'unit',
+                        label: 'واحد',
+                        value: (item) => item.unit,
+                      ),
+                      CrmTableColumn(
+                        id: 'unit_price',
+                        label: 'مبلغ واحد',
+                        value: (item) => compactMoney(item.unitPrice),
+                        sortValue: (item) => item.unitPrice,
+                        numeric: true,
+                      ),
+                      CrmTableColumn(
+                        id: 'discount',
+                        label: 'تخفیف',
+                        value: (item) =>
+                            '${formatPersianInteger(item.discountPercent)}٪',
+                        sortValue: (item) => item.discountPercent,
+                        numeric: true,
+                      ),
+                      CrmTableColumn(
+                        id: 'tax',
+                        label: 'ارزش افزوده',
+                        value: (item) => compactMoney(item.taxAmount),
+                        sortValue: (item) => item.taxAmount,
+                        numeric: true,
+                      ),
+                      CrmTableColumn(
+                        id: 'total',
+                        label: 'مبلغ کل',
+                        value: (item) => compactMoney(item.totalAmount),
+                        sortValue: (item) => item.totalAmount,
+                        numeric: true,
+                      ),
+                      CrmTableColumn(
+                        id: 'actions',
+                        label: 'عملیات',
+                        value: (_) => '',
+                        canHide: false,
+                        filterable: false,
+                        cell: (context, item) => PopupMenuButton<String>(
+                          tooltip: 'عملیات ردیف سند',
+                          onSelected: (value) {
+                            final index = _lines.indexOf(item);
+                            if (index < 0) return;
+                            if (value == 'edit') _editLine(index);
+                            if (value == 'delete') {
+                              setState(() => _lines.removeAt(index));
+                            }
+                          },
+                          itemBuilder: (context) => const [
+                            PopupMenuItem(value: 'edit', child: Text('ویرایش')),
+                            PopupMenuItem(value: 'delete', child: Text('حذف')),
                           ],
-                        );
-                      }),
-                    ),
+                        ),
+                      ),
+                    ],
                   ),
                 const SizedBox(height: 12),
                 Wrap(

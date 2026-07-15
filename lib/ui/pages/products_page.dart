@@ -4,6 +4,18 @@ import '../../core/crm_store.dart';
 import '../../core/models.dart';
 import '../../core/report_service.dart';
 import '../widgets/common.dart';
+import '../widgets/entity_tools.dart';
+
+Future<CrmProduct?> showCrmProductEditor(
+  BuildContext context, {
+  required CrmStore store,
+  CrmProduct? product,
+}) {
+  return showDialog<CrmProduct>(
+    context: context,
+    builder: (context) => _ProductEditor(store: store, product: product),
+  );
+}
 
 class ProductsPage extends StatefulWidget {
   const ProductsPage({super.key, required this.store});
@@ -24,12 +36,12 @@ class _ProductsPageState extends State<ProductsPage> {
   }
 
   Future<void> _openEditor([CrmProduct? product]) async {
-    final saved = await showDialog<bool>(
-      context: context,
-      builder: (context) =>
-          _ProductEditor(store: widget.store, product: product),
+    final saved = await showCrmProductEditor(
+      context,
+      store: widget.store,
+      product: product,
     );
-    if (!mounted || saved != true) return;
+    if (!mounted || saved == null) return;
     showCrmNotice(
       context,
       product == null ? 'محصول ثبت شد.' : 'محصول ویرایش شد.',
@@ -106,6 +118,36 @@ class _ProductsPageState extends State<ProductsPage> {
     numericColumns: const {4, 5},
   );
 
+  Future<void> _viewProduct(CrmProduct product) => CrmReportService.printTable(
+    context: context,
+    title: 'مشاهده کالا / خدمت ${product.name}',
+    headers: const [
+      'نام',
+      'کد',
+      'دسته',
+      'واحد',
+      'قیمت',
+      'موجودی',
+      'حداقل موجودی',
+      'وضعیت',
+      'شرح',
+    ],
+    rows: [
+      [
+        product.name,
+        product.sku,
+        product.category,
+        product.unit,
+        product.unitPrice,
+        product.stock,
+        product.minStock,
+        product.isActive ? 'فعال' : 'غیرفعال',
+        product.description,
+      ],
+    ],
+    numericColumns: const {4, 5, 6},
+  );
+
   @override
   Widget build(BuildContext context) {
     final needle = _search.text.trim().toLowerCase();
@@ -146,7 +188,16 @@ class _ProductsPageState extends State<ProductsPage> {
             ),
           ],
         ),
-        const SizedBox(height: 20),
+        const SizedBox(height: 12),
+        CrmPageToolbar(
+          onNew: () => _openEditor(),
+          onReport: _printReport,
+          onTools: _addCategory,
+          onRefresh: widget.store.refresh,
+          onSearch: () => setState(() {}),
+          onAdvancedFilter: () => setState(() {}),
+        ),
+        const SizedBox(height: 18),
         Wrap(
           spacing: 14,
           runSpacing: 14,
@@ -317,9 +368,34 @@ class _ProductsPageState extends State<ProductsPage> {
                       value: (_) => '',
                       canHide: false,
                       filterable: false,
-                      cell: (context, product) => RecordActions(
-                        onEdit: () => _openEditor(product),
-                        onDelete: () => _delete(product),
+                      cell: (context, product) => PopupMenuButton<String>(
+                        tooltip: 'عملیات کالا',
+                        onSelected: (value) {
+                          if (value == 'view') _viewProduct(product);
+                          if (value == 'edit') _openEditor(product);
+                          if (value == 'note') _openEditor(product);
+                          if (value == 'history') {
+                            showCrmAuditLog(
+                              context,
+                              store: widget.store,
+                              entityType: 'product',
+                              entityId: product.id,
+                              title: product.name,
+                            );
+                          }
+                          if (value == 'delete') _delete(product);
+                        },
+                        itemBuilder: (context) => const [
+                          PopupMenuItem(value: 'view', child: Text('مشاهده')),
+                          PopupMenuItem(value: 'edit', child: Text('ویرایش')),
+                          PopupMenuItem(value: 'note', child: Text('یادداشت')),
+                          PopupMenuItem(
+                            value: 'history',
+                            child: Text('تاریخچه'),
+                          ),
+                          PopupMenuDivider(),
+                          PopupMenuItem(value: 'delete', child: Text('حذف')),
+                        ],
                       ),
                     ),
                   ],
@@ -384,7 +460,7 @@ class _ProductEditorState extends State<_ProductEditor> {
   Future<void> _save() async {
     if (!_form.currentState!.validate()) return;
     setState(() => _saving = true);
-    await widget.store.saveProduct(
+    final saved = await widget.store.saveProduct(
       id: widget.product?.id,
       name: _name.text,
       sku: _sku.text,
@@ -396,7 +472,7 @@ class _ProductEditorState extends State<_ProductEditor> {
       description: _description.text,
       isActive: _active,
     );
-    if (mounted) Navigator.of(context).pop(true);
+    if (mounted) Navigator.of(context).pop(saved);
   }
 
   @override

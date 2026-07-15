@@ -4,6 +4,9 @@ import '../../core/crm_store.dart';
 import '../../core/models.dart';
 import '../../core/report_service.dart';
 import '../widgets/common.dart';
+import '../widgets/entity_tools.dart';
+import 'calls_page.dart';
+import 'documents_page.dart';
 
 class OpportunitiesPage extends StatefulWidget {
   const OpportunitiesPage({super.key, required this.store});
@@ -145,6 +148,63 @@ class _OpportunitiesPageState extends State<OpportunitiesPage> {
     );
   }
 
+  Future<void> _viewOpportunity(CrmOpportunity item) {
+    return CrmReportService.printTable(
+      context: context,
+      title: 'مشاهده فرصت ${item.title}',
+      subtitle: 'پیش‌نمایش کامل فرصت پیش از چاپ',
+      headers: const [
+        'مشتری',
+        'عنوان',
+        'نوع',
+        'کالا/خدمت',
+        'استان',
+        'شهر',
+        'مرحله',
+        'مبلغ',
+        'احتمال',
+        'تاریخ هدف',
+        'یادداشت',
+      ],
+      rows: [
+        [
+          item.customerName,
+          item.title,
+          item.tradeType,
+          item.productName,
+          item.province,
+          item.city,
+          item.stage,
+          item.amount,
+          item.probability,
+          item.expectedClose == null ? '—' : compactDate(item.expectedClose!),
+          item.notes,
+        ],
+      ],
+      rowDates: [item.expectedClose],
+      numericColumns: const {7, 8},
+    );
+  }
+
+  Future<void> _newCall(CrmOpportunity item) {
+    return showCrmCallEditor(
+      context,
+      store: widget.store,
+      initialCustomerId: item.customerId,
+    ).then((_) {});
+  }
+
+  Future<void> _newDocument(CrmOpportunity item, DocumentPageMode mode) async {
+    await showDialog<bool>(
+      context: context,
+      builder: (context) => DocumentEditorDialog(
+        store: widget.store,
+        mode: mode,
+        initialCustomerId: item.customerId,
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final rows = _filteredOpportunities();
@@ -204,7 +264,15 @@ class _OpportunitiesPageState extends State<OpportunitiesPage> {
             ),
           ],
         ),
-        const SizedBox(height: 20),
+        const SizedBox(height: 12),
+        CrmPageToolbar(
+          onNew: _openEditor,
+          onReport: _printReport,
+          onRefresh: widget.store.refresh,
+          onSearch: () => setState(() {}),
+          onAdvancedFilter: () => setState(() {}),
+        ),
+        const SizedBox(height: 18),
         Wrap(
           spacing: 14,
           runSpacing: 14,
@@ -446,9 +514,82 @@ class _OpportunitiesPageState extends State<OpportunitiesPage> {
                             onChanged: (value) =>
                                 _toggleRealized(item, value ?? false),
                           ),
-                          RecordActions(
-                            onEdit: () => _openEditor(item),
-                            onDelete: () => _delete(item),
+                          PopupMenuButton<String>(
+                            tooltip: 'عملیات فرصت',
+                            onSelected: (value) {
+                              if (value == 'view') _viewOpportunity(item);
+                              if (value == 'edit') _openEditor(item);
+                              if (value == 'note') _openEditor(item);
+                              if (value == 'call') _newCall(item);
+                              if (value == 'quote') {
+                                _newDocument(item, DocumentPageMode.quote);
+                              }
+                              if (value == 'order' || value == 'invoice') {
+                                _newDocument(item, DocumentPageMode.order);
+                              }
+                              if (value == 'attachments') {
+                                showCrmAttachmentManager(
+                                  context,
+                                  store: widget.store,
+                                  entityType: 'opportunity',
+                                  entityId: item.id,
+                                  title: item.title,
+                                );
+                              }
+                              if (value == 'history') {
+                                showCrmAuditLog(
+                                  context,
+                                  store: widget.store,
+                                  entityType: 'opportunity',
+                                  entityId: item.id,
+                                  title: item.title,
+                                );
+                              }
+                              if (value == 'delete') _delete(item);
+                            },
+                            itemBuilder: (context) => const [
+                              PopupMenuItem(
+                                value: 'view',
+                                child: Text('مشاهده'),
+                              ),
+                              PopupMenuItem(
+                                value: 'edit',
+                                child: Text('ویرایش'),
+                              ),
+                              PopupMenuItem(
+                                value: 'note',
+                                child: Text('یادداشت'),
+                              ),
+                              PopupMenuItem(
+                                value: 'call',
+                                child: Text('ثبت تماس'),
+                              ),
+                              PopupMenuItem(
+                                value: 'quote',
+                                child: Text('پیش‌فاکتور'),
+                              ),
+                              PopupMenuItem(
+                                value: 'order',
+                                child: Text('سفارش'),
+                              ),
+                              PopupMenuItem(
+                                value: 'invoice',
+                                child: Text('فاکتور'),
+                              ),
+                              PopupMenuItem(
+                                value: 'attachments',
+                                child: Text('فایل‌های پیوست'),
+                              ),
+                              PopupMenuItem(
+                                value: 'history',
+                                child: Text('تاریخچه'),
+                              ),
+                              PopupMenuDivider(),
+                              PopupMenuItem(
+                                value: 'delete',
+                                child: Text('حذف'),
+                              ),
+                            ],
                           ),
                         ],
                       ),

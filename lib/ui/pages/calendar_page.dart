@@ -182,7 +182,15 @@ class _CalendarPageState extends State<CalendarPage> {
             ),
           ],
         ),
-        const SizedBox(height: 20),
+        const SizedBox(height: 12),
+        CrmPageToolbar(
+          onNew: () => _openEditor(initialDate: DateTime.now()),
+          onReport: _printReport,
+          onRefresh: widget.store.refresh,
+          onSearch: () => setState(() {}),
+          onAdvancedFilter: () => setState(() {}),
+        ),
+        const SizedBox(height: 18),
         _MonthCalendar(
           month: _visibleMonth,
           events: _events,

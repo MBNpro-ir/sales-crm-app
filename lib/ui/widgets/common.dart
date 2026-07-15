@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:math' as math;
 
@@ -655,6 +656,9 @@ class CrmTableColumn<T> {
     this.canHide = true,
     this.filterable = true,
     this.initiallyVisible = true,
+    this.initialWidth = 150,
+    this.minWidth = 80,
+    this.maxWidth = 360,
   });
 
   final String id;
@@ -666,6 +670,18 @@ class CrmTableColumn<T> {
   final bool canHide;
   final bool filterable;
   final bool initiallyVisible;
+  final double initialWidth;
+  final double minWidth;
+  final double maxWidth;
+}
+
+class _CrmSortSpec {
+  const _CrmSortSpec(this.columnId, this.ascending);
+
+  final String columnId;
+  final bool ascending;
+
+  Map<String, dynamic> toJson() => {'column': columnId, 'ascending': ascending};
 }
 
 /// A reusable Windows-friendly table whose column order and visibility are
@@ -680,6 +696,10 @@ class CrmConfigurableDataTable<T> extends StatefulWidget {
     this.initialSortColumnId,
     this.initialSortAscending = true,
     this.showToolbar = true,
+    this.showRowNumbers = true,
+    this.enableSelection = true,
+    this.rowKey,
+    this.rowColor,
   });
 
   final String tableId;
@@ -688,6 +708,10 @@ class CrmConfigurableDataTable<T> extends StatefulWidget {
   final String? initialSortColumnId;
   final bool initialSortAscending;
   final bool showToolbar;
+  final bool showRowNumbers;
+  final bool enableSelection;
+  final Object Function(T item)? rowKey;
+  final Color? Function(T item)? rowColor;
 
   @override
   State<CrmConfigurableDataTable<T>> createState() =>
@@ -699,10 +723,21 @@ class _CrmConfigurableDataTableState<T>
   late List<String> _order;
   late Set<String> _visible;
   final Map<String, TextEditingController> _filters = {};
+  final TextEditingController _globalSearch = TextEditingController();
+  final Set<Object> _selected = {};
+  final Map<String, double> _widths = {};
+  final Set<String> _frozen = {};
+  List<_CrmSortSpec> _sorts = const [];
+  String _preferenceScope = 'offline';
+  int _page = 0;
+  int _pageSize = 25;
   String? _sortColumnId;
   late bool _sortAscending;
 
-  String get _preferenceKey => 'crm_table_layout_${widget.tableId}';
+  String get _preferenceKey =>
+      'crm_table_layout_${_preferenceScope}_${widget.tableId}';
+  String get _filterPresetKey =>
+      'crm_table_filters_${_preferenceScope}_${widget.tableId}';
 
   @override
   void initState() {
@@ -714,6 +749,12 @@ class _CrmConfigurableDataTableState<T>
         .toSet();
     _sortColumnId = widget.initialSortColumnId;
     _sortAscending = widget.initialSortAscending;
+    if (_sortColumnId != null) {
+      _sorts = [_CrmSortSpec(_sortColumnId!, _sortAscending)];
+    }
+    for (final column in widget.columns) {
+      _widths[column.id] = column.initialWidth;
+    }
     _syncFilterControllers();
     _loadLayout();
   }
@@ -732,11 +773,19 @@ class _CrmConfigurableDataTableState<T>
     for (final column in widget.columns.where((column) => !column.canHide)) {
       _visible.add(column.id);
     }
+    for (final column in widget.columns) {
+      _widths.putIfAbsent(column.id, () => column.initialWidth);
+    }
+    _widths.removeWhere((id, _) => !ids.contains(id));
+    _frozen.removeWhere((id) => !ids.contains(id));
+    final rowKeys = widget.rows.map(_keyFor).toSet();
+    _selected.removeWhere((key) => !rowKeys.contains(key));
     _syncFilterControllers();
   }
 
   @override
   void dispose() {
+    _globalSearch.dispose();
     for (final controller in _filters.values) {
       controller.dispose();
     }
@@ -756,6 +805,8 @@ class _CrmConfigurableDataTableState<T>
 
   Future<void> _loadLayout() async {
     final preferences = await SharedPreferences.getInstance();
+    _preferenceScope =
+        preferences.getString('crm_active_user_scope') ?? 'offline';
     final raw = preferences.getString(_preferenceKey);
     if (raw == null || !mounted) return;
     try {
@@ -770,6 +821,27 @@ class _CrmConfigurableDataTableState<T>
           .map((item) => item.toString())
           .where(ids.contains)
           .toSet();
+      final savedWidths = (decoded['widths'] as Map? ?? const {}).map(
+        (key, value) =>
+            MapEntry(key.toString(), double.tryParse(value.toString()) ?? 150),
+      );
+      final savedFrozen = (decoded['frozen'] as List? ?? const [])
+          .map((item) => item.toString())
+          .where(ids.contains)
+          .toSet();
+      final savedSorts = (decoded['sorts'] as List? ?? const [])
+          .whereType<Map>()
+          .map(
+            (item) => _CrmSortSpec(
+              item['column']?.toString() ?? '',
+              item['ascending'] != false,
+            ),
+          )
+          .where((item) => ids.contains(item.columnId))
+          .toList();
+      final savedFilters = (decoded['filters'] as Map? ?? const {}).map(
+        (key, value) => MapEntry(key.toString(), value.toString()),
+      );
       setState(() {
         _order = [
           ...savedOrder,
@@ -783,6 +855,27 @@ class _CrmConfigurableDataTableState<T>
         )) {
           _visible.add(column.id);
         }
+        for (final column in widget.columns) {
+          final width = savedWidths[column.id];
+          if (width != null) {
+            _widths[column.id] = width
+                .clamp(column.minWidth, column.maxWidth)
+                .toDouble();
+          }
+        }
+        _frozen
+          ..clear()
+          ..addAll(savedFrozen);
+        if (savedSorts.isNotEmpty) {
+          _sorts = savedSorts;
+          _sortColumnId = savedSorts.first.columnId;
+          _sortAscending = savedSorts.first.ascending;
+        }
+        _pageSize = int.tryParse(decoded['page_size']?.toString() ?? '') ?? 25;
+        for (final entry in savedFilters.entries) {
+          _filters[entry.key]?.text = entry.value;
+        }
+        _globalSearch.text = decoded['search']?.toString() ?? '';
       });
     } catch (_) {
       // Ignore an old or partially written layout and keep safe defaults.
@@ -793,7 +886,18 @@ class _CrmConfigurableDataTableState<T>
     final preferences = await SharedPreferences.getInstance();
     await preferences.setString(
       _preferenceKey,
-      jsonEncode({'order': _order, 'visible': _visible.toList()}),
+      jsonEncode({
+        'order': _order,
+        'visible': _visible.toList(),
+        'widths': _widths,
+        'frozen': _frozen.toList(),
+        'sorts': _sorts.map((item) => item.toJson()).toList(),
+        'page_size': _pageSize,
+        'search': _globalSearch.text,
+        'filters': {
+          for (final entry in _filters.entries) entry.key: entry.value.text,
+        },
+      }),
     );
   }
 
@@ -801,7 +905,14 @@ class _CrmConfigurableDataTableState<T>
       widget.columns.firstWhere((column) => column.id == id);
 
   List<T> _filteredRows() {
+    final needle = _globalSearch.text.trim().toLowerCase();
     final rows = widget.rows.where((item) {
+      if (needle.isNotEmpty &&
+          !widget.columns.any(
+            (column) => column.value(item).toLowerCase().contains(needle),
+          )) {
+        return false;
+      }
       for (final column in widget.columns) {
         if (!column.filterable) continue;
         final filter = _filters[column.id]?.text.trim().toLowerCase() ?? '';
@@ -812,14 +923,17 @@ class _CrmConfigurableDataTableState<T>
       }
       return true;
     }).toList();
-    if (_sortColumnId != null) {
-      final column = _column(_sortColumnId!);
+    if (_sorts.isNotEmpty) {
       rows.sort((left, right) {
-        final result = _compare(
-          column.sortValue?.call(left) ?? column.value(left),
-          column.sortValue?.call(right) ?? column.value(right),
-        );
-        return _sortAscending ? result : -result;
+        for (final spec in _sorts) {
+          final column = _column(spec.columnId);
+          final result = _compare(
+            column.sortValue?.call(left) ?? column.value(left),
+            column.sortValue?.call(right) ?? column.value(right),
+          );
+          if (result != 0) return spec.ascending ? result : -result;
+        }
+        return 0;
       });
     }
     return rows;
@@ -828,6 +942,8 @@ class _CrmConfigurableDataTableState<T>
   Future<void> _configure() async {
     var order = [..._order];
     var visible = {..._visible};
+    var frozen = {..._frozen};
+    final widths = {..._widths};
     final previousFilters = {
       for (final entry in _filters.entries) entry.key: entry.value.text,
     };
@@ -854,26 +970,74 @@ class _CrmConfigurableDataTableState<T>
                   key: ValueKey(id),
                   leading: const Icon(Icons.drag_indicator_rounded),
                   title: Text(column.label),
-                  subtitle: column.filterable
-                      ? TextField(
+                  subtitle: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      if (column.filterable)
+                        TextField(
                           controller: _filters[id],
                           decoration: const InputDecoration(
                             isDense: true,
                             labelText: 'فیلتر این ستون',
                           ),
-                        )
-                      : null,
-                  trailing: Switch(
-                    value: visible.contains(id),
-                    onChanged: !column.canHide
-                        ? null
-                        : (value) => setDialogState(() {
-                            if (value) {
-                              visible.add(id);
-                            } else if (visible.length > 1) {
-                              visible.remove(id);
-                            }
-                          }),
+                        ),
+                      Row(
+                        children: [
+                          const Text('عرض'),
+                          Expanded(
+                            child: Slider(
+                              value: widths[id] ?? column.initialWidth,
+                              min: column.minWidth,
+                              max: column.maxWidth,
+                              divisions:
+                                  ((column.maxWidth - column.minWidth) / 10)
+                                      .round(),
+                              label: formatPersianInteger(
+                                (widths[id] ?? column.initialWidth).round(),
+                              ),
+                              onChanged: (value) =>
+                                  setDialogState(() => widths[id] = value),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                  trailing: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      IconButton(
+                        tooltip: frozen.contains(id)
+                            ? 'لغو ثابت‌سازی ستون'
+                            : 'ثابت‌سازی ستون',
+                        onPressed: () => setDialogState(() {
+                          if (frozen.contains(id)) {
+                            frozen.remove(id);
+                          } else {
+                            frozen.add(id);
+                            visible.add(id);
+                          }
+                        }),
+                        icon: Icon(
+                          frozen.contains(id)
+                              ? Icons.push_pin_rounded
+                              : Icons.push_pin_outlined,
+                        ),
+                      ),
+                      Switch(
+                        value: visible.contains(id),
+                        onChanged: !column.canHide
+                            ? null
+                            : (value) => setDialogState(() {
+                                if (value) {
+                                  visible.add(id);
+                                } else if (visible.length > 1) {
+                                  visible.remove(id);
+                                  frozen.remove(id);
+                                }
+                              }),
+                      ),
+                    ],
                   ),
                 );
               },
@@ -893,6 +1057,14 @@ class _CrmConfigurableDataTableState<T>
                       )
                       .map((column) => column.id)
                       .toSet();
+                  frozen = {};
+                  widths
+                    ..clear()
+                    ..addEntries(
+                      widget.columns.map(
+                        (column) => MapEntry(column.id, column.initialWidth),
+                      ),
+                    );
                 });
               },
               child: const Text('بازنشانی'),
@@ -913,6 +1085,12 @@ class _CrmConfigurableDataTableState<T>
       setState(() {
         _order = order;
         _visible = visible;
+        _frozen
+          ..clear()
+          ..addAll(frozen);
+        _widths
+          ..clear()
+          ..addAll(widths);
       });
       await _saveLayout();
     } else {
@@ -922,13 +1100,423 @@ class _CrmConfigurableDataTableState<T>
     }
   }
 
+  Object _keyFor(T item) => widget.rowKey?.call(item) ?? identityHashCode(item);
+
+  Future<void> _configureSorts() async {
+    final selected = <String, bool>{
+      for (final item in _sorts) item.columnId: item.ascending,
+    };
+    final applied = await showDialog<bool>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Text('مرتب‌سازی چندمرحله‌ای'),
+          content: SizedBox(
+            width: 520,
+            height: 470,
+            child: ListView(
+              children: _order.map((id) {
+                final column = _column(id);
+                final enabled = selected.containsKey(id);
+                return CheckboxListTile(
+                  key: ValueKey(id),
+                  value: enabled,
+                  title: Text(column.label),
+                  subtitle: enabled
+                      ? Text(selected[id]! ? 'صعودی' : 'نزولی')
+                      : null,
+                  secondary: enabled
+                      ? IconButton(
+                          tooltip: selected[id]! ? 'نزولی شود' : 'صعودی شود',
+                          onPressed: () => setDialogState(
+                            () => selected[id] = !selected[id]!,
+                          ),
+                          icon: Icon(
+                            selected[id]!
+                                ? Icons.arrow_upward_rounded
+                                : Icons.arrow_downward_rounded,
+                          ),
+                        )
+                      : const Icon(Icons.drag_indicator_rounded),
+                  onChanged: (value) => setDialogState(() {
+                    value == true ? selected[id] = true : selected.remove(id);
+                  }),
+                );
+              }).toList(),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => setDialogState(selected.clear),
+              child: const Text('پاک‌کردن'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('انصراف'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('اعمال'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (applied != true) return;
+    setState(() {
+      _sorts = _order
+          .where(selected.containsKey)
+          .map((id) => _CrmSortSpec(id, selected[id]!))
+          .toList();
+      _sortColumnId = _sorts.firstOrNull?.columnId;
+      _sortAscending = _sorts.firstOrNull?.ascending ?? true;
+      _page = 0;
+    });
+    await _saveLayout();
+  }
+
+  Future<void> _saveFilterPreset() async {
+    final controller = TextEditingController();
+    final name = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('ذخیره فیلتر پرکاربرد'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          decoration: const InputDecoration(labelText: 'نام فیلتر'),
+          onSubmitted: (value) => Navigator.pop(context, value),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('انصراف'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, controller.text),
+            child: const Text('ذخیره'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (name == null || name.trim().isEmpty) return;
+    final preferences = await SharedPreferences.getInstance();
+    final existing = preferences.getString(_filterPresetKey);
+    final presets = existing == null
+        ? <Map<String, dynamic>>[]
+        : (jsonDecode(existing) as List)
+              .whereType<Map>()
+              .map((item) => Map<String, dynamic>.from(item))
+              .toList();
+    presets.removeWhere((item) => item['name'] == name.trim());
+    presets.add({
+      'name': name.trim(),
+      'search': _globalSearch.text,
+      'filters': {
+        for (final entry in _filters.entries) entry.key: entry.value.text,
+      },
+    });
+    await preferences.setString(_filterPresetKey, jsonEncode(presets));
+    if (mounted) {
+      showCrmNotice(
+        context,
+        'فیلتر «${name.trim()}» ذخیره شد.',
+        type: CrmNoticeType.success,
+      );
+    }
+  }
+
+  Future<void> _openFilterPresets() async {
+    final preferences = await SharedPreferences.getInstance();
+    final raw = preferences.getString(_filterPresetKey);
+    final presets = raw == null
+        ? <Map<String, dynamic>>[]
+        : (jsonDecode(raw) as List)
+              .whereType<Map>()
+              .map((item) => Map<String, dynamic>.from(item))
+              .toList();
+    if (!mounted) return;
+    final selected = await showDialog<Map<String, dynamic>>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('فیلترهای ذخیره‌شده'),
+        content: SizedBox(
+          width: 520,
+          height: 380,
+          child: presets.isEmpty
+              ? const Center(child: Text('هنوز فیلتری ذخیره نشده است.'))
+              : ListView.builder(
+                  itemCount: presets.length,
+                  itemBuilder: (context, index) => ListTile(
+                    leading: const Icon(Icons.filter_alt_outlined),
+                    title: Text(presets[index]['name']?.toString() ?? ''),
+                    onTap: () => Navigator.pop(context, presets[index]),
+                    trailing: IconButton(
+                      tooltip: 'حذف قالب فیلتر',
+                      onPressed: () async {
+                        presets.removeAt(index);
+                        await preferences.setString(
+                          _filterPresetKey,
+                          jsonEncode(presets),
+                        );
+                        if (context.mounted) Navigator.pop(context);
+                      },
+                      icon: const Icon(Icons.delete_outline_rounded),
+                    ),
+                  ),
+                ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('بستن'),
+          ),
+        ],
+      ),
+    );
+    if (selected == null) return;
+    final filters = (selected['filters'] as Map? ?? const {}).map(
+      (key, value) => MapEntry(key.toString(), value.toString()),
+    );
+    setState(() {
+      _globalSearch.text = selected['search']?.toString() ?? '';
+      for (final entry in _filters.entries) {
+        entry.value.text = filters[entry.key] ?? '';
+      }
+      _page = 0;
+    });
+  }
+
+  Future<void> _resetLayout() async {
+    final preferences = await SharedPreferences.getInstance();
+    await preferences.remove(_preferenceKey);
+    setState(() {
+      _order = widget.columns.map((column) => column.id).toList();
+      _visible = widget.columns
+          .where((column) => column.initiallyVisible || !column.canHide)
+          .map((column) => column.id)
+          .toSet();
+      _widths
+        ..clear()
+        ..addEntries(
+          widget.columns.map(
+            (column) => MapEntry(column.id, column.initialWidth),
+          ),
+        );
+      _frozen.clear();
+      _sorts = widget.initialSortColumnId == null
+          ? const []
+          : [
+              _CrmSortSpec(
+                widget.initialSortColumnId!,
+                widget.initialSortAscending,
+              ),
+            ];
+      _sortColumnId = widget.initialSortColumnId;
+      _sortAscending = widget.initialSortAscending;
+      _pageSize = 25;
+      _page = 0;
+      _selected.clear();
+      _globalSearch.clear();
+      for (final controller in _filters.values) {
+        controller.clear();
+      }
+    });
+  }
+
+  void _clearFilters() {
+    setState(() {
+      _globalSearch.clear();
+      for (final controller in _filters.values) {
+        controller.clear();
+      }
+      _page = 0;
+    });
+  }
+
+  Future<void> _copyRows(List<T> rows, List<CrmTableColumn<T>> columns) {
+    final selectedRows = rows
+        .where((item) => _selected.contains(_keyFor(item)))
+        .toList();
+    final source = selectedRows.isEmpty ? rows : selectedRows;
+    final text = <String>[
+      columns.map((column) => column.label).join('\t'),
+      ...source.map(
+        (item) => columns.map((column) => column.value(item)).join('\t'),
+      ),
+    ].join('\n');
+    return Clipboard.setData(ClipboardData(text: text));
+  }
+
+  Widget _buildTable(
+    List<CrmTableColumn<T>> columns,
+    List<T> rows, {
+    required int rowOffset,
+    required bool includeRowNumbers,
+    required bool includeSelection,
+  }) {
+    final primarySort = _sorts.firstOrNull;
+    final localSortIndex = primarySort == null
+        ? -1
+        : columns.indexWhere((column) => column.id == primarySort.columnId);
+    final hasRowNumbers =
+        includeRowNumbers &&
+        widget.showRowNumbers &&
+        !widget.columns.any((column) => column.id == 'row');
+    final sortIndex = localSortIndex < 0
+        ? null
+        : localSortIndex + (hasRowNumbers ? 1 : 0);
+    final scheme = Theme.of(context).colorScheme;
+    return DataTable(
+      showCheckboxColumn: includeSelection && widget.enableSelection,
+      horizontalMargin: 12,
+      columnSpacing: 12,
+      dataRowMinHeight: 56,
+      dataRowMaxHeight: 56,
+      headingRowHeight: 56,
+      headingRowColor: WidgetStatePropertyAll(scheme.surfaceContainerHighest),
+      sortColumnIndex: sortIndex,
+      sortAscending: primarySort?.ascending ?? true,
+      columns: [
+        if (hasRowNumbers)
+          const DataColumn(
+            label: SizedBox(width: 42, child: Text('ردیف')),
+            numeric: true,
+          ),
+        ...columns.map((column) {
+          final width = _widths[column.id] ?? column.initialWidth;
+          return DataColumn(
+            label: SizedBox(
+              width: width,
+              child: Row(
+                children: [
+                  if (_frozen.contains(column.id)) ...[
+                    const Icon(Icons.push_pin_rounded, size: 14),
+                    const SizedBox(width: 4),
+                  ],
+                  Expanded(
+                    child: Text(column.label, overflow: TextOverflow.ellipsis),
+                  ),
+                ],
+              ),
+            ),
+            numeric: column.numeric,
+            onSort: column.sortValue == null && !column.filterable
+                ? null
+                : (_, ascending) {
+                    setState(() {
+                      _sorts = [_CrmSortSpec(column.id, ascending)];
+                      _sortColumnId = column.id;
+                      _sortAscending = ascending;
+                      _page = 0;
+                    });
+                    unawaited(_saveLayout());
+                  },
+          );
+        }),
+      ],
+      rows: rows.asMap().entries.map((entry) {
+        final item = entry.value;
+        final key = _keyFor(item);
+        final selected = _selected.contains(key);
+        final color = widget.rowColor?.call(item) ?? _defaultRowColor(item);
+        return DataRow(
+          selected: selected,
+          color: color == null ? null : WidgetStatePropertyAll(color),
+          onSelectChanged: includeSelection && widget.enableSelection
+              ? (value) => setState(
+                  () => value == true
+                      ? _selected.add(key)
+                      : _selected.remove(key),
+                )
+              : null,
+          cells: [
+            if (hasRowNumbers)
+              DataCell(
+                SizedBox(
+                  width: 42,
+                  child: Text(
+                    formatPersianInteger(rowOffset + entry.key + 1),
+                    textAlign: TextAlign.center,
+                  ),
+                ),
+              ),
+            ...columns.map((column) {
+              final width = _widths[column.id] ?? column.initialWidth;
+              return DataCell(
+                SizedBox(
+                  width: width,
+                  child: ClipRect(
+                    child: Align(
+                      alignment: column.numeric
+                          ? AlignmentDirectional.centerEnd
+                          : AlignmentDirectional.centerStart,
+                      child:
+                          column.cell?.call(context, item) ??
+                          Text(
+                            column.value(item),
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                    ),
+                  ),
+                ),
+              );
+            }),
+          ],
+        );
+      }).toList(),
+    );
+  }
+
+  Color? _defaultRowColor(T item) {
+    final statusColumn = widget.columns
+        .where(
+          (column) =>
+              column.id == 'status' ||
+              column.id == 'stage' ||
+              column.id == 'priority',
+        )
+        .firstOrNull;
+    final status = statusColumn?.value(item).toLowerCase() ?? '';
+    final scheme = Theme.of(context).colorScheme;
+    if (status.contains('ناموفق') ||
+        status.contains('از دست') ||
+        status.contains('منقضی')) {
+      return scheme.errorContainer.withValues(alpha: 0.22);
+    }
+    if (status.contains('موفق') ||
+        status.contains('برنده') ||
+        status.contains('تکمیل')) {
+      return Colors.green.withValues(alpha: 0.08);
+    }
+    if (status.contains('بالا') || status.contains('پیگیری')) {
+      return scheme.tertiaryContainer.withValues(alpha: 0.18);
+    }
+    return null;
+  }
+
   @override
   Widget build(BuildContext context) {
     final columns = _order.where(_visible.contains).map(_column).toList();
     final rows = _filteredRows();
-    final sortIndex = _sortColumnId == null
-        ? null
-        : columns.indexWhere((column) => column.id == _sortColumnId);
+    final pageCount = math.max(1, (rows.length / _pageSize).ceil());
+    if (_page >= pageCount) _page = pageCount - 1;
+    final start = _page * _pageSize;
+    final pageRows = rows.skip(start).take(_pageSize).toList();
+    final frozenColumns = columns
+        .where((column) => _frozen.contains(column.id))
+        .toList();
+    final scrollingColumns = columns
+        .where((column) => !_frozen.contains(column.id))
+        .toList();
+    final hasFilters =
+        _globalSearch.text.isNotEmpty ||
+        _filters.values.any((controller) => controller.text.isNotEmpty);
+    final allSelected =
+        rows.isNotEmpty &&
+        rows.every((item) => _selected.contains(_keyFor(item)));
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -938,69 +1526,188 @@ class _CrmConfigurableDataTableState<T>
             runSpacing: 8,
             crossAxisAlignment: WrapCrossAlignment.center,
             children: [
+              SizedBox(
+                width: 250,
+                child: TextField(
+                  controller: _globalSearch,
+                  onChanged: (_) => setState(() => _page = 0),
+                  decoration: const InputDecoration(
+                    isDense: true,
+                    labelText: 'جستجو داخل جدول',
+                    prefixIcon: Icon(Icons.search_rounded),
+                  ),
+                ),
+              ),
               OutlinedButton.icon(
                 onPressed: _configure,
                 icon: const Icon(Icons.view_column_outlined),
-                label: const Text('ستون‌ها، ترتیب و فیلتر'),
+                label: const Text('ستون‌ها و چیدمان'),
               ),
-              if (_filters.values.any(
-                (controller) => controller.text.isNotEmpty,
-              ))
+              OutlinedButton.icon(
+                onPressed: _configureSorts,
+                icon: const Icon(Icons.sort_rounded),
+                label: Text(
+                  _sorts.length > 1
+                      ? 'مرتب‌سازی ${formatPersianInteger(_sorts.length)} مرحله‌ای'
+                      : 'مرتب‌سازی چندمرحله‌ای',
+                ),
+              ),
+              PopupMenuButton<String>(
+                tooltip: 'فیلترهای پرکاربرد',
+                onSelected: (value) => switch (value) {
+                  'save' => _saveFilterPreset(),
+                  'load' => _openFilterPresets(),
+                  _ => null,
+                },
+                itemBuilder: (context) => const [
+                  PopupMenuItem(value: 'save', child: Text('ذخیره فیلتر فعلی')),
+                  PopupMenuItem(
+                    value: 'load',
+                    child: Text('فیلترهای ذخیره‌شده'),
+                  ),
+                ],
+                child: const Chip(
+                  avatar: Icon(Icons.filter_alt_outlined, size: 18),
+                  label: Text('فیلترها'),
+                ),
+              ),
+              if (hasFilters)
                 TextButton.icon(
-                  onPressed: () => setState(() {
-                    for (final controller in _filters.values) {
-                      controller.clear();
+                  onPressed: _clearFilters,
+                  icon: const Icon(Icons.filter_alt_off_outlined),
+                  label: const Text('پاک‌کردن فیلترها'),
+                ),
+              if (widget.enableSelection)
+                FilterChip(
+                  selected: allSelected,
+                  label: const Text('انتخاب همه رکوردها'),
+                  avatar: const Icon(Icons.select_all_rounded, size: 18),
+                  onSelected: (value) => setState(() {
+                    if (value) {
+                      _selected.addAll(rows.map(_keyFor));
+                    } else {
+                      _selected.removeAll(rows.map(_keyFor));
                     }
                   }),
-                  icon: const Icon(Icons.filter_alt_off_outlined),
-                  label: const Text('پاک‌کردن فیلتر ستون‌ها'),
                 ),
+              OutlinedButton.icon(
+                onPressed: rows.isEmpty
+                    ? null
+                    : () async {
+                        await _copyRows(rows, columns);
+                        if (context.mounted) {
+                          showCrmNotice(
+                            context,
+                            _selected.isEmpty
+                                ? 'رکوردهای نمایشی کپی شدند.'
+                                : 'رکوردهای انتخاب‌شده کپی شدند.',
+                            type: CrmNoticeType.success,
+                          );
+                        }
+                      },
+                icon: const Icon(Icons.copy_all_outlined),
+                label: const Text('کپی'),
+              ),
+              TextButton.icon(
+                onPressed: _resetLayout,
+                icon: const Icon(Icons.restart_alt_rounded),
+                label: const Text('چیدمان پیش‌فرض'),
+              ),
               Text(
-                '${formatPersianInteger(rows.length)} ردیف نمایشی',
+                '${formatPersianInteger(rows.length)} ردیف',
                 style: Theme.of(context).textTheme.labelLarge,
               ),
             ],
           ),
           const SizedBox(height: 8),
         ],
-        CrmTableScroll(
-          child: DataTable(
-            headingRowColor: WidgetStatePropertyAll(
-              Theme.of(context).colorScheme.surfaceContainerHighest,
+        if (frozenColumns.isEmpty || scrollingColumns.isEmpty)
+          CrmTableScroll(
+            child: _buildTable(
+              columns,
+              pageRows,
+              rowOffset: start,
+              includeRowNumbers: true,
+              includeSelection: true,
             ),
-            sortColumnIndex: sortIndex != null && sortIndex >= 0
-                ? sortIndex
-                : null,
-            sortAscending: _sortAscending,
-            columns: columns
-                .map(
-                  (column) => DataColumn(
-                    label: Text(column.label),
-                    numeric: column.numeric,
-                    onSort: column.sortValue == null && !column.filterable
-                        ? null
-                        : (_, ascending) => setState(() {
-                            _sortColumnId = column.id;
-                            _sortAscending = ascending;
-                          }),
+          )
+        else
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _buildTable(
+                frozenColumns,
+                pageRows,
+                rowOffset: start,
+                includeRowNumbers: true,
+                includeSelection: true,
+              ),
+              Expanded(
+                child: CrmTableScroll(
+                  child: _buildTable(
+                    scrollingColumns,
+                    pageRows,
+                    rowOffset: start,
+                    includeRowNumbers: false,
+                    includeSelection: false,
                   ),
-                )
-                .toList(),
-            rows: rows
-                .map(
-                  (item) => DataRow(
-                    cells: columns
-                        .map(
-                          (column) => DataCell(
-                            column.cell?.call(context, item) ??
-                                Text(column.value(item)),
-                          ),
-                        )
-                        .toList(),
-                  ),
-                )
-                .toList(),
+                ),
+              ),
+            ],
           ),
+        const SizedBox(height: 10),
+        Wrap(
+          alignment: WrapAlignment.spaceBetween,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          spacing: 12,
+          runSpacing: 8,
+          children: [
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text('تعداد در صفحه: '),
+                DropdownButton<int>(
+                  value: _pageSize,
+                  items: const [10, 25, 50, 100]
+                      .map(
+                        (size) => DropdownMenuItem(
+                          value: size,
+                          child: Text(formatPersianInteger(size)),
+                        ),
+                      )
+                      .toList(),
+                  onChanged: (value) {
+                    if (value == null) return;
+                    setState(() {
+                      _pageSize = value;
+                      _page = 0;
+                    });
+                    unawaited(_saveLayout());
+                  },
+                ),
+              ],
+            ),
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                IconButton(
+                  tooltip: 'صفحه قبل',
+                  onPressed: _page <= 0 ? null : () => setState(() => _page--),
+                  icon: const Icon(Icons.chevron_right_rounded),
+                ),
+                Text(
+                  'صفحه ${formatPersianInteger(_page + 1)} از ${formatPersianInteger(pageCount)}',
+                ),
+                IconButton(
+                  tooltip: 'صفحه بعد',
+                  onPressed: _page >= pageCount - 1
+                      ? null
+                      : () => setState(() => _page++),
+                  icon: const Icon(Icons.chevron_left_rounded),
+                ),
+              ],
+            ),
+          ],
         ),
       ],
     );
@@ -1179,6 +1886,77 @@ class CrmPageHeader extends StatelessWidget {
         ),
         Wrap(spacing: 10, runSpacing: 8, children: actions),
       ],
+    );
+  }
+}
+
+class CrmPageToolbar extends StatelessWidget {
+  const CrmPageToolbar({
+    super.key,
+    this.onNew,
+    this.onEdit,
+    this.onDelete,
+    this.onView,
+    this.onReport,
+    this.onExportExcel,
+    this.onImportExcel,
+    this.onTools,
+    this.onRefresh,
+    this.onSearch,
+    this.onAdvancedFilter,
+    this.extraActions = const [],
+  });
+
+  final VoidCallback? onNew;
+  final VoidCallback? onEdit;
+  final VoidCallback? onDelete;
+  final VoidCallback? onView;
+  final VoidCallback? onReport;
+  final VoidCallback? onExportExcel;
+  final VoidCallback? onImportExcel;
+  final VoidCallback? onTools;
+  final VoidCallback? onRefresh;
+  final VoidCallback? onSearch;
+  final VoidCallback? onAdvancedFilter;
+  final List<Widget> extraActions;
+
+  @override
+  Widget build(BuildContext context) {
+    Widget action(String label, IconData icon, VoidCallback? callback) {
+      return OutlinedButton.icon(
+        onPressed: callback,
+        icon: Icon(icon),
+        label: Text(label),
+      );
+    }
+
+    return Card(
+      margin: EdgeInsets.zero,
+      child: Padding(
+        padding: const EdgeInsets.all(10),
+        child: Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            action('جدید', Icons.add_rounded, onNew),
+            action('ویرایش', Icons.edit_outlined, onEdit),
+            action('حذف', Icons.delete_outline_rounded, onDelete),
+            action('نمایش', Icons.visibility_outlined, onView),
+            action('گزارش و چاپ', Icons.print_outlined, onReport),
+            action('خروجی Excel', Icons.file_download_outlined, onExportExcel),
+            action('ورود Excel', Icons.file_upload_outlined, onImportExcel),
+            action('ابزار', Icons.handyman_outlined, onTools),
+            action('بروزرسانی', Icons.refresh_rounded, onRefresh),
+            action('جستجو', Icons.search_rounded, onSearch),
+            action(
+              'فیلتر پیشرفته',
+              Icons.filter_alt_outlined,
+              onAdvancedFilter,
+            ),
+            ...extraActions,
+          ],
+        ),
+      ),
     );
   }
 }

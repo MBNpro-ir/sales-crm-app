@@ -1,12 +1,50 @@
 import 'package:flutter/material.dart';
 
 import '../../core/crm_store.dart';
+import '../../core/report_service.dart';
 import '../widgets/common.dart';
 
 class PerformancePage extends StatelessWidget {
   const PerformancePage({super.key, required this.store});
 
   final CrmStore store;
+
+  Future<void> _printPerformance(BuildContext context) {
+    final owners = _owners();
+    return CrmReportService.printTable(
+      context: context,
+      title: 'گزارش عملکرد کارشناسان فروش',
+      headers: const [
+        'کارشناس',
+        'فرصت باز',
+        'پایپ‌لاین وزنی',
+        'وظایف',
+        'سفارش فروش',
+      ],
+      rows: owners
+          .map(
+            (owner) => [
+              owner,
+              store.opportunities
+                  .where(
+                    (item) =>
+                        item.ownerName == owner &&
+                        !{'برنده شده', 'از دست رفته'}.contains(item.stage),
+                  )
+                  .length,
+              store.opportunities
+                  .where((item) => item.ownerName == owner)
+                  .fold<int>(0, (sum, item) => sum + item.weightedAmount),
+              store.tasks.where((item) => item.ownerName == owner).length,
+              store.orders
+                  .where((item) => item.direction == 'فروش')
+                  .fold<int>(0, (sum, item) => sum + item.totalAmount),
+            ],
+          )
+          .toList(),
+      numericColumns: const {1, 2, 3, 4},
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -22,7 +60,12 @@ class PerformancePage extends StatelessWidget {
           subtitle:
               'خروجی فرصت‌ها، وظایف و اسناد فروش را در یک نمای مدیریتی برای هر کارشناس بررسی کنید.',
         ),
-        const SizedBox(height: 20),
+        const SizedBox(height: 12),
+        CrmPageToolbar(
+          onReport: () => _printPerformance(context),
+          onRefresh: store.refresh,
+        ),
+        const SizedBox(height: 18),
         Wrap(
           spacing: 14,
           runSpacing: 14,

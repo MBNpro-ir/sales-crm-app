@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/crm_store.dart';
 import '../../core/models.dart';
+import '../../core/report_service.dart';
 import '../widgets/common.dart';
 
 class MarketPage extends StatefulWidget {
@@ -15,6 +16,34 @@ class MarketPage extends StatefulWidget {
 
 class _MarketPageState extends State<MarketPage> {
   String? _selectedProvince;
+
+  Future<void> _printMarket() => CrmReportService.printTable(
+    context: context,
+    title: 'گزارش نقشه بازار و جذب مشتری',
+    subtitle: 'قابل فیلتر بر اساس استان، شهر، وضعیت، اولویت و منبع جذب',
+    headers: const [
+      'مشتری',
+      'استان',
+      'شهر',
+      'وضعیت',
+      'اولویت',
+      'منبع جذب',
+      'کالای مورد علاقه',
+    ],
+    rows: widget.store.customers
+        .map(
+          (item) => [
+            item.displayName,
+            item.province,
+            item.city,
+            item.status,
+            item.priority,
+            item.details['source'] ?? '',
+            item.details['interested_products'] ?? '',
+          ],
+        )
+        .toList(),
+  );
 
   @override
   Widget build(BuildContext context) {
@@ -45,7 +74,14 @@ class _MarketPageState extends State<MarketPage> {
           subtitle:
               'پوشش جغرافیایی مشتریان، کانال‌های جذب و مشتریان بالقوه را برای برنامه‌ریزی فروش بررسی کنید.',
         ),
-        const SizedBox(height: 20),
+        const SizedBox(height: 12),
+        CrmPageToolbar(
+          onReport: _printMarket,
+          onRefresh: widget.store.refresh,
+          onSearch: () => setState(() {}),
+          onAdvancedFilter: () => setState(() {}),
+        ),
+        const SizedBox(height: 18),
         Wrap(
           spacing: 14,
           runSpacing: 14,

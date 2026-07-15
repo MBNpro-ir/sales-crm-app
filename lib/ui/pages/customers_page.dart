@@ -4,6 +4,7 @@ import '../../core/crm_store.dart';
 import '../../core/models.dart';
 import '../../core/report_service.dart';
 import '../widgets/common.dart';
+import '../widgets/entity_tools.dart';
 import 'calls_page.dart';
 import 'documents_page.dart';
 
@@ -27,6 +28,7 @@ class _CustomersPageState extends State<CustomersPage> {
   String? _statusFilter;
   String? _priorityFilter;
   String? _provinceFilter;
+  String? _quickFilter;
 
   @override
   void dispose() {
@@ -91,8 +93,57 @@ class _CustomersPageState extends State<CustomersPage> {
               customer.activityType == _activityFilter) &&
           (_statusFilter == null || customer.status == _statusFilter) &&
           (_priorityFilter == null || customer.priority == _priorityFilter) &&
-          (_provinceFilter == null || customer.province == _provinceFilter);
+          (_provinceFilter == null || customer.province == _provinceFilter) &&
+          _matchesQuickFilter(customer);
     }).toList();
+  }
+
+  bool _matchesQuickFilter(CrmCustomer customer) {
+    final filter = _quickFilter;
+    if (filter == null) return true;
+    final calls = widget.store.calls
+        .where((item) => item.customerId == customer.id)
+        .toList();
+    final opportunities = widget.store.opportunities
+        .where((item) => item.customerId == customer.id)
+        .toList();
+    final lastCall = calls.isEmpty
+        ? null
+        : calls
+              .map((item) => item.callAt)
+              .reduce((left, right) => left.isAfter(right) ? left : right);
+    final daysWithoutCall = lastCall == null
+        ? 1 << 20
+        : DateTime.now().difference(lastCall).inDays;
+    return switch (filter) {
+      'مشتری جدید' =>
+        DateTime.now().difference(customer.updatedAt).inDays <= 30,
+      'مشتری VIP' => customer.isVip,
+      'بدون تماس ۱۵ تا ۲۰ روز' =>
+        daysWithoutCall >= 15 && daysWithoutCall <= 20,
+      'بدون تماس ۲۰ تا ۳۰ روز' => daysWithoutCall > 20 && daysWithoutCall <= 30,
+      'بدون خرید' => !calls.any((item) => item.tradeType == 'خرید'),
+      'بدون فروش' => !calls.any((item) => item.tradeType == 'فروش'),
+      'فرصت فعال' => opportunities.any(
+        (item) => !{'برنده شده', 'از دست رفته'}.contains(item.stage),
+      ),
+      'فرصت منقضی' => opportunities.any(
+        (item) =>
+            item.expectedClose != null &&
+            item.expectedClose!.isBefore(DateTime.now()) &&
+            !{'برنده شده', 'از دست رفته'}.contains(item.stage),
+      ),
+      'اولویت بالا' => {'بالا', 'خیلی بالا'}.contains(customer.priority),
+      _ => true,
+    };
+  }
+
+  Future<void> _showDetails(CrmCustomer customer) {
+    return showDialog<void>(
+      context: context,
+      builder: (context) =>
+          _CustomerDetailsDialog(store: widget.store, customer: customer),
+    );
   }
 
   List<List<Object?>> _rowsForExport(List<CrmCustomer> customers) => customers
@@ -232,32 +283,52 @@ class _CustomersPageState extends State<CustomersPage> {
     }
   }
 
-  Future<void> _backupTools() async {
-    final action = await showDialog<String>(
+  Future<void> _newOrder(CrmCustomer customer) async {
+    final saved = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('تهیه و بازیابی پشتیبانی'),
-        content: const Text(
-          'نسخه پشتیبان شامل تمام اطلاعات فضای کاری محلی، صف همگام‌سازی و اسناد است.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('انصراف'),
-          ),
-          OutlinedButton.icon(
-            onPressed: () => Navigator.pop(context, 'restore'),
-            icon: const Icon(Icons.restore_rounded),
-            label: const Text('بازیابی پشتیبان'),
-          ),
-          FilledButton.icon(
-            onPressed: () => Navigator.pop(context, 'create'),
-            icon: const Icon(Icons.backup_outlined),
-            label: const Text('تهیه پشتیبان'),
-          ),
-        ],
+      builder: (context) => DocumentEditorDialog(
+        store: widget.store,
+        mode: DocumentPageMode.order,
+        initialCustomerId: customer.id,
       ),
     );
+    if (mounted && saved == true) {
+      showCrmNotice(
+        context,
+        'سفارش مشتری ثبت شد.',
+        type: CrmNoticeType.success,
+      );
+    }
+  }
+
+  Future<void> _backupTools([String? requestedAction]) async {
+    final action =
+        requestedAction ??
+        await showDialog<String>(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: const Text('تهیه و بازیابی پشتیبانی'),
+            content: const Text(
+              'نسخه پشتیبان شامل تمام اطلاعات فضای کاری محلی، صف همگام‌سازی و اسناد است.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('انصراف'),
+              ),
+              OutlinedButton.icon(
+                onPressed: () => Navigator.pop(context, 'restore'),
+                icon: const Icon(Icons.restore_rounded),
+                label: const Text('بازیابی پشتیبان'),
+              ),
+              FilledButton.icon(
+                onPressed: () => Navigator.pop(context, 'create'),
+                icon: const Icon(Icons.backup_outlined),
+                label: const Text('تهیه پشتیبان'),
+              ),
+            ],
+          ),
+        );
     if (action == 'create') {
       final data = await widget.store.createWorkspaceBackup();
       final path = await CrmReportService.saveJsonFile(
@@ -333,7 +404,8 @@ class _CustomersPageState extends State<CustomersPage> {
                 if (value == 'import') _importExcel();
                 if (value == 'export') _exportExcel();
                 if (value == 'phonebook') _openPhonebook();
-                if (value == 'backup') _backupTools();
+                if (value == 'backup') _backupTools('create');
+                if (value == 'restore') _backupTools('restore');
                 if (value == 'sync') _sync();
               },
               itemBuilder: (context) => const [
@@ -341,12 +413,13 @@ class _CustomersPageState extends State<CustomersPage> {
                   value: 'import',
                   child: Text('ورود اطلاعات از اکسل'),
                 ),
-                PopupMenuItem(value: 'export', child: Text('خروجی از اکسل')),
-                PopupMenuItem(value: 'phonebook', child: Text('دفتر تلفن')),
                 PopupMenuItem(
-                  value: 'backup',
-                  child: Text('تهیه و بازیابی پشتیبانی'),
+                  value: 'export',
+                  child: Text('خروجی اطلاعات به اکسل'),
                 ),
+                PopupMenuItem(value: 'phonebook', child: Text('دفتر تلفن')),
+                PopupMenuItem(value: 'backup', child: Text('تهیه پشتیبان')),
+                PopupMenuItem(value: 'restore', child: Text('بازیابی پشتیبان')),
                 PopupMenuItem(value: 'sync', child: Text('همگام‌سازی')),
               ],
               child: IgnorePointer(
@@ -364,13 +437,42 @@ class _CustomersPageState extends State<CustomersPage> {
             ),
           ],
         ),
-        const SizedBox(height: 22),
+        const SizedBox(height: 12),
+        CrmPageToolbar(
+          onNew: _openEditor,
+          onReport: _openPhonebook,
+          onExportExcel: _exportExcel,
+          onImportExcel: _importExcel,
+          onTools: _backupTools,
+          onRefresh: widget.store.refresh,
+          onSearch: () => setState(() {}),
+          onAdvancedFilter: () => setState(() {}),
+        ),
+        const SizedBox(height: 18),
         SectionCard(
           title: 'فیلتر هر ستون',
           child: Wrap(
             spacing: 10,
             runSpacing: 10,
             children: [
+              ...const [
+                'مشتری جدید',
+                'مشتری VIP',
+                'بدون تماس ۱۵ تا ۲۰ روز',
+                'بدون تماس ۲۰ تا ۳۰ روز',
+                'بدون خرید',
+                'بدون فروش',
+                'فرصت فعال',
+                'فرصت منقضی',
+                'اولویت بالا',
+              ].map(
+                (filter) => ChoiceChip(
+                  selected: _quickFilter == filter,
+                  label: Text(filter),
+                  onSelected: (selected) =>
+                      setState(() => _quickFilter = selected ? filter : null),
+                ),
+              ),
               _filterText(_search, 'جست‌وجوی سراسری', Icons.search_rounded),
               _filterText(_codeFilter, 'کد مشتری', Icons.numbers_rounded),
               _filterText(_nameFilter, 'نام / شرکت', Icons.person_outline),
@@ -526,22 +628,51 @@ class _CustomersPageState extends State<CustomersPage> {
                   cell: (context, customer) => PopupMenuButton<String>(
                     tooltip: 'عملیات مشتری',
                     onSelected: (value) {
+                      if (value == 'view') _showDetails(customer);
                       if (value == 'edit') _openEditor(customer);
+                      if (value == 'note') _openEditor(customer);
                       if (value == 'call') _newCall(customer);
                       if (value == 'quote') _newQuote(customer);
-                      if (value == 'preview') _openPhonebook([customer]);
+                      if (value == 'order') _newOrder(customer);
+                      if (value == 'print') _openPhonebook([customer]);
+                      if (value == 'attachments') {
+                        showCrmAttachmentManager(
+                          context,
+                          store: widget.store,
+                          entityType: 'customer',
+                          entityId: customer.id,
+                          title: customer.displayName,
+                        );
+                      }
+                      if (value == 'history') {
+                        showCrmAuditLog(
+                          context,
+                          store: widget.store,
+                          entityType: 'customer',
+                          entityId: customer.id,
+                          title: customer.displayName,
+                        );
+                      }
                       if (value == 'delete') _delete(customer);
                     },
                     itemBuilder: (context) => const [
+                      PopupMenuItem(value: 'view', child: Text('مشاهده')),
                       PopupMenuItem(value: 'edit', child: Text('ویرایش')),
+                      PopupMenuItem(value: 'note', child: Text('یادداشت')),
                       PopupMenuItem(
                         value: 'call',
                         child: Text('ثبت تماس جدید'),
                       ),
                       PopupMenuItem(value: 'quote', child: Text('پیش‌فاکتور')),
+                      PopupMenuItem(value: 'order', child: Text('سفارش')),
+                      PopupMenuItem(value: 'print', child: Text('گزارش و چاپ')),
                       PopupMenuItem(
-                        value: 'preview',
-                        child: Text('نمایش و پرینت'),
+                        value: 'attachments',
+                        child: Text('فایل‌های پیوست'),
+                      ),
+                      PopupMenuItem(
+                        value: 'history',
+                        child: Text('تاریخچه تغییرات'),
                       ),
                       PopupMenuDivider(),
                       PopupMenuItem(value: 'delete', child: Text('حذف')),
@@ -587,6 +718,350 @@ class _CustomersPageState extends State<CustomersPage> {
       onChanged: changed,
     ),
   );
+}
+
+class _CustomerTimelineEvent {
+  const _CustomerTimelineEvent({
+    required this.date,
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.color,
+  });
+
+  final DateTime date;
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final Color color;
+}
+
+class _CustomerDetailsDialog extends StatefulWidget {
+  const _CustomerDetailsDialog({required this.store, required this.customer});
+
+  final CrmStore store;
+  final CrmCustomer customer;
+
+  @override
+  State<_CustomerDetailsDialog> createState() => _CustomerDetailsDialogState();
+}
+
+class _CustomerDetailsDialogState extends State<_CustomerDetailsDialog> {
+  List<_CustomerTimelineEvent> get _events {
+    final customer = widget.customer;
+    final result = <_CustomerTimelineEvent>[
+      if (customer.notes.trim().isNotEmpty)
+        _CustomerTimelineEvent(
+          date: customer.updatedAt,
+          icon: Icons.sticky_note_2_outlined,
+          title: 'یادداشت مشتری',
+          subtitle: customer.notes,
+          color: Colors.amber,
+        ),
+      ...widget.store.calls
+          .where((item) => item.customerId == customer.id)
+          .map(
+            (item) => _CustomerTimelineEvent(
+              date: item.callAt,
+              icon: item.type == 'جلسه'
+                  ? Icons.groups_outlined
+                  : Icons.phone_in_talk_outlined,
+              title: item.type == 'جلسه' ? 'جلسه' : 'تماس',
+              subtitle: '${item.subject} — ${item.status}',
+              color: Colors.blue,
+            ),
+          ),
+      ...widget.store.opportunities
+          .where((item) => item.customerId == customer.id)
+          .map(
+            (item) => _CustomerTimelineEvent(
+              date: item.updatedAt,
+              icon: Icons.track_changes_outlined,
+              title: 'فرصت ${item.tradeType}',
+              subtitle: '${item.title} — ${item.stage}',
+              color: Colors.purple,
+            ),
+          ),
+      ...widget.store.quotes
+          .where((item) => item.customerId == customer.id)
+          .map(
+            (item) => _CustomerTimelineEvent(
+              date: item.updatedAt,
+              icon: Icons.request_quote_outlined,
+              title: 'پیش‌فاکتور ${item.quoteNumber}',
+              subtitle: '${item.status} — ${compactMoney(item.totalAmount)}',
+              color: Colors.teal,
+            ),
+          ),
+      ...widget.store.orders
+          .where((item) => item.customerId == customer.id)
+          .map(
+            (item) => _CustomerTimelineEvent(
+              date: item.orderAt,
+              icon: item.status.contains('فاکتور')
+                  ? Icons.receipt_long_outlined
+                  : Icons.shopping_cart_outlined,
+              title: item.status.contains('فاکتور')
+                  ? 'فاکتور ${item.orderNumber}'
+                  : 'سفارش ${item.orderNumber}',
+              subtitle: '${item.status} — ${compactMoney(item.totalAmount)}',
+              color: Colors.green,
+            ),
+          ),
+      ...widget.store.tasks
+          .where((item) => item.customerId == customer.id)
+          .map(
+            (item) => _CustomerTimelineEvent(
+              date: item.updatedAt,
+              icon: Icons.note_alt_outlined,
+              title: item.taskType,
+              subtitle: '${item.title} — ${item.status}',
+              color: Colors.orange,
+            ),
+          ),
+      ...widget.store
+          .attachmentsFor('customer', customer.id)
+          .map(
+            (item) => _CustomerTimelineEvent(
+              date: item.updatedAt,
+              icon: Icons.attach_file_rounded,
+              title: 'فایل پیوست',
+              subtitle: item.fileName,
+              color: Colors.blueGrey,
+            ),
+          ),
+    ];
+    result.sort((left, right) => right.date.compareTo(left.date));
+    return result;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final customer = widget.customer;
+    final attachments = widget.store.attachmentsFor('customer', customer.id);
+    final audits = widget.store.auditFor('customer', customer.id);
+    return DefaultTabController(
+      length: 4,
+      child: AlertDialog(
+        title: Text('پرونده مشتری — ${customer.displayName}'),
+        content: SizedBox(
+          width: 900,
+          height: 620,
+          child: Column(
+            children: [
+              const TabBar(
+                tabs: [
+                  Tab(text: 'مشخصات', icon: Icon(Icons.badge_outlined)),
+                  Tab(text: 'سوابق فعالیت', icon: Icon(Icons.timeline_rounded)),
+                  Tab(text: 'پیوست‌ها', icon: Icon(Icons.attach_file_rounded)),
+                  Tab(text: 'تاریخچه', icon: Icon(Icons.history_rounded)),
+                ],
+              ),
+              Expanded(
+                child: TabBarView(
+                  children: [
+                    ListView(
+                      padding: const EdgeInsets.all(16),
+                      children: [
+                        _detailsGrid(customer),
+                        if (customer.notes.isNotEmpty) ...[
+                          const SizedBox(height: 16),
+                          Text('یادداشت: ${customer.notes}'),
+                        ],
+                      ],
+                    ),
+                    _events.isEmpty
+                        ? const EmptyState(
+                            icon: Icons.timeline_rounded,
+                            title: 'سابقه‌ای وجود ندارد',
+                            message:
+                                'تماس، جلسه یا سند بعدی اینجا نمایش داده می‌شود.',
+                          )
+                        : ListView.builder(
+                            padding: const EdgeInsets.all(16),
+                            itemCount: _events.length,
+                            itemBuilder: (context, index) {
+                              final event = _events[index];
+                              return IntrinsicHeight(
+                                child: Row(
+                                  crossAxisAlignment:
+                                      CrossAxisAlignment.stretch,
+                                  children: [
+                                    SizedBox(
+                                      width: 42,
+                                      child: Column(
+                                        children: [
+                                          CircleAvatar(
+                                            radius: 17,
+                                            backgroundColor: event.color
+                                                .withValues(alpha: 0.14),
+                                            child: Icon(
+                                              event.icon,
+                                              size: 18,
+                                              color: event.color,
+                                            ),
+                                          ),
+                                          if (index < _events.length - 1)
+                                            Expanded(
+                                              child: VerticalDivider(
+                                                color: event.color.withValues(
+                                                  alpha: 0.35,
+                                                ),
+                                              ),
+                                            ),
+                                        ],
+                                      ),
+                                    ),
+                                    Expanded(
+                                      child: ListTile(
+                                        title: Text(event.title),
+                                        subtitle: Text(event.subtitle),
+                                        trailing: Text(
+                                          formatJalaliDate(
+                                            event.date,
+                                            includeTime: true,
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              );
+                            },
+                          ),
+                    Column(
+                      children: [
+                        Padding(
+                          padding: const EdgeInsets.all(12),
+                          child: FilledButton.icon(
+                            onPressed: () async {
+                              await showCrmAttachmentManager(
+                                context,
+                                store: widget.store,
+                                entityType: 'customer',
+                                entityId: customer.id,
+                                title: customer.displayName,
+                              );
+                              if (mounted) setState(() {});
+                            },
+                            icon: const Icon(Icons.attach_file_rounded),
+                            label: const Text('مدیریت فایل‌های پیوست'),
+                          ),
+                        ),
+                        Expanded(
+                          child: attachments.isEmpty
+                              ? const Center(child: Text('فایلی ثبت نشده است.'))
+                              : ListView(
+                                  children: attachments
+                                      .map(
+                                        (item) => ListTile(
+                                          leading: const Icon(
+                                            Icons.insert_drive_file_outlined,
+                                          ),
+                                          title: Text(item.fileName),
+                                          subtitle: Text(item.uploadedBy),
+                                        ),
+                                      )
+                                      .toList(),
+                                ),
+                        ),
+                      ],
+                    ),
+                    Column(
+                      children: [
+                        Padding(
+                          padding: const EdgeInsets.all(12),
+                          child: OutlinedButton.icon(
+                            onPressed: () => showCrmAuditLog(
+                              context,
+                              store: widget.store,
+                              entityType: 'customer',
+                              entityId: customer.id,
+                              title: customer.displayName,
+                            ),
+                            icon: const Icon(Icons.manage_history_rounded),
+                            label: const Text('نمایش مقادیر قبلی و جدید'),
+                          ),
+                        ),
+                        Expanded(
+                          child: audits.isEmpty
+                              ? const Center(
+                                  child: Text('تغییری ثبت نشده است.'),
+                                )
+                              : ListView(
+                                  children: audits
+                                      .map(
+                                        (item) => ListTile(
+                                          leading: const Icon(Icons.history),
+                                          title: Text(item.action),
+                                          subtitle: Text(item.userName),
+                                          trailing: Text(
+                                            formatJalaliDate(
+                                              item.updatedAt,
+                                              includeTime: true,
+                                            ),
+                                          ),
+                                        ),
+                                      )
+                                      .toList(),
+                                ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          FilledButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('بستن'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _detailsGrid(CrmCustomer customer) {
+    final entries = <String, String>{
+      'کد مشتری': customer.customerCode,
+      'نام مخاطب': customer.name,
+      'شرکت': customer.company,
+      'موبایل': customer.mobile,
+      'تلفن': customer.phone,
+      'ایمیل': customer.details['email'] ?? '',
+      'استان': customer.province,
+      'شهر': customer.city,
+      'نوع فعالیت': customer.activityType,
+      'وضعیت': customer.status,
+      'اولویت': customer.priority,
+      'آدرس': customer.details['address'] ?? '',
+      'برچسب‌ها': customer.tags.join('، '),
+    };
+    return Wrap(
+      spacing: 12,
+      runSpacing: 12,
+      children: entries.entries
+          .map(
+            (entry) => SizedBox(
+              width: 260,
+              child: ListTile(
+                tileColor: Theme.of(context).colorScheme.surfaceContainerLow,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                title: Text(entry.key),
+                subtitle: SelectableText(
+                  entry.value.trim().isEmpty ? '—' : entry.value,
+                ),
+              ),
+            ),
+          )
+          .toList(),
+    );
+  }
 }
 
 class _CustomerEditorDialog extends StatefulWidget {

@@ -4,7 +4,9 @@ import '../../core/crm_store.dart';
 import '../../core/models.dart';
 import '../../core/report_service.dart';
 import '../widgets/common.dart';
+import '../widgets/entity_tools.dart';
 import 'documents_page.dart';
+import 'products_page.dart';
 
 Future<bool?> showCrmCallEditor(
   BuildContext context, {
@@ -51,7 +53,6 @@ class _CallsPageState extends State<CallsPage> {
   String? _tradeFilter;
   String? _activityFilter;
   String? _priorityFilter;
-  String _groupBy = 'نتیجه تماس';
   bool _vipOnly = false;
 
   @override
@@ -309,6 +310,45 @@ class _CallsPageState extends State<CallsPage> {
     }
   }
 
+  Future<void> _viewCall(CrmCall call) {
+    final customer = _customerFor(call);
+    return CrmReportService.printTable(
+      context: context,
+      title: 'مشاهده تماس ${call.subject}',
+      subtitle: 'پیش‌نمایش کامل رکورد تماس پیش از چاپ',
+      headers: const [
+        'مشتری',
+        'موضوع',
+        'نوع',
+        'تاریخ',
+        'ساعت',
+        'نتیجه',
+        'کالا/خدمت',
+        'جمع کل',
+        'استان',
+        'شهر',
+        'یادداشت',
+      ],
+      rows: [
+        [
+          call.customerName,
+          call.subject,
+          call.type,
+          compactDate(call.callAt),
+          formatJalaliDate(call.callAt, includeTime: true).split('، ').last,
+          call.status,
+          call.productName,
+          compactMoney(call.totalAmount),
+          customer?.province ?? '',
+          customer?.city ?? '',
+          call.notes,
+        ],
+      ],
+      rowDates: [call.callAt],
+      numericColumns: const {7},
+    );
+  }
+
   List<CrmCall> _filteredCalls() {
     final needle = _search.text.trim().toLowerCase();
     return widget.store.calls.where((call) {
@@ -372,7 +412,17 @@ class _CallsPageState extends State<CallsPage> {
             ),
           ],
         ),
-        const SizedBox(height: 22),
+        const SizedBox(height: 12),
+        CrmPageToolbar(
+          onNew: () => _openEditor(),
+          onReport: _printCalls,
+          onExportExcel: _exportExcel,
+          onImportExcel: _importExcel,
+          onRefresh: widget.store.refresh,
+          onSearch: () => setState(() {}),
+          onAdvancedFilter: () => setState(() {}),
+        ),
+        const SizedBox(height: 18),
         Wrap(
           spacing: 14,
           runSpacing: 14,
@@ -471,7 +521,7 @@ class _CallsPageState extends State<CallsPage> {
         ),
         const SizedBox(height: 18),
         SectionCard(
-          title: 'فیلتر هر ستون و دسته‌بندی',
+          title: 'فیلتر هر ستون',
           child: Wrap(
             spacing: 10,
             runSpacing: 10,
@@ -520,13 +570,6 @@ class _CallsPageState extends State<CallsPage> {
                 store.customerPriorities,
                 (value) => setState(() => _priorityFilter = value),
               ),
-              _filter(
-                'دسته‌بندی بر اساس',
-                _groupBy,
-                const ['نتیجه تماس', 'نوع فعالیت', 'تاریخ', 'اولویت'],
-                (value) => setState(() => _groupBy = value ?? _groupBy),
-                includeAll: false,
-              ),
               FilterChip(
                 selected: _vipOnly,
                 avatar: const Icon(Icons.workspace_premium_outlined),
@@ -536,8 +579,6 @@ class _CallsPageState extends State<CallsPage> {
             ],
           ),
         ),
-        const SizedBox(height: 12),
-        _groupSummary(rows),
         const SizedBox(height: 18),
         SectionCard(
           title: 'فهرست تماس‌ها',
@@ -553,7 +594,7 @@ class _CallsPageState extends State<CallsPage> {
               : CrmConfigurableDataTable<CrmCall>(
                   tableId: 'calls',
                   rows: rows,
-                  initialSortColumnId: 'date_time',
+                  initialSortColumnId: 'call_date',
                   initialSortAscending: false,
                   columns: [
                     CrmTableColumn(
@@ -619,10 +660,18 @@ class _CallsPageState extends State<CallsPage> {
                       numeric: true,
                     ),
                     CrmTableColumn(
-                      id: 'date_time',
-                      label: 'تاریخ و زمان تماس',
-                      value: (item) =>
-                          formatJalaliDate(item.callAt, includeTime: true),
+                      id: 'call_date',
+                      label: 'تاریخ تماس',
+                      value: (item) => formatJalaliDate(item.callAt),
+                      sortValue: (item) => item.callAt,
+                    ),
+                    CrmTableColumn(
+                      id: 'call_time',
+                      label: 'ساعت تماس',
+                      value: (item) => formatJalaliDate(
+                        item.callAt,
+                        includeTime: true,
+                      ).split('، ').last,
                       sortValue: (item) => item.callAt,
                     ),
                     CrmTableColumn(
@@ -672,22 +721,59 @@ class _CallsPageState extends State<CallsPage> {
                       cell: (context, call) => PopupMenuButton<String>(
                         tooltip: 'عملیات تماس',
                         onSelected: (value) {
+                          if (value == 'view') _viewCall(call);
                           if (value == 'edit') _openEditor(call);
+                          if (value == 'note') _openEditor(call);
                           if (value == 'quote') {
                             _newDocument(call, DocumentPageMode.quote);
                           }
                           if (value == 'order') {
                             _newDocument(call, DocumentPageMode.order);
                           }
+                          if (value == 'invoice') {
+                            _newDocument(call, DocumentPageMode.order);
+                          }
+                          if (value == 'attachments') {
+                            showCrmAttachmentManager(
+                              context,
+                              store: widget.store,
+                              entityType: 'call',
+                              entityId: call.id,
+                              title: call.subject,
+                            );
+                          }
+                          if (value == 'history') {
+                            showCrmAuditLog(
+                              context,
+                              store: widget.store,
+                              entityType: 'call',
+                              entityId: call.id,
+                              title: call.subject,
+                            );
+                          }
                           if (value == 'delete') _delete(call);
                         },
                         itemBuilder: (context) => const [
+                          PopupMenuItem(value: 'view', child: Text('مشاهده')),
                           PopupMenuItem(value: 'edit', child: Text('ویرایش')),
+                          PopupMenuItem(value: 'note', child: Text('یادداشت')),
                           PopupMenuItem(
                             value: 'quote',
                             child: Text('پیش‌فاکتور'),
                           ),
                           PopupMenuItem(value: 'order', child: Text('سفارش')),
+                          PopupMenuItem(
+                            value: 'invoice',
+                            child: Text('فاکتور'),
+                          ),
+                          PopupMenuItem(
+                            value: 'attachments',
+                            child: Text('فایل‌های پیوست'),
+                          ),
+                          PopupMenuItem(
+                            value: 'history',
+                            child: Text('تاریخچه'),
+                          ),
                           PopupMenuDivider(),
                           PopupMenuItem(value: 'delete', child: Text('حذف')),
                         ],
@@ -721,36 +807,6 @@ class _CallsPageState extends State<CallsPage> {
       onChanged: changed,
     ),
   );
-
-  Widget _groupSummary(List<CrmCall> calls) {
-    final groups = <String, int>{};
-    for (final call in calls) {
-      final customer = _customerFor(call);
-      final key = switch (_groupBy) {
-        'نوع فعالیت' => customer?.activityType ?? 'نامشخص',
-        'تاریخ' => compactDate(call.callAt),
-        'اولویت' => customer?.priority ?? 'نامشخص',
-        _ => call.status,
-      };
-      groups[key] = (groups[key] ?? 0) + 1;
-    }
-    return SectionCard(
-      title: 'دسته‌بندی بر اساس $_groupBy',
-      child: Wrap(
-        spacing: 8,
-        runSpacing: 8,
-        children: groups.entries
-            .map(
-              (entry) => Chip(
-                label: Text(
-                  '${entry.key}: ${formatPersianInteger(entry.value)}',
-                ),
-              ),
-            )
-            .toList(),
-      ),
-    );
-  }
 }
 
 class _CallEditorDialog extends StatefulWidget {
@@ -986,12 +1042,20 @@ class _CallEditorDialogState extends State<_CallEditorDialog> {
                       labelText: 'کالا / خدمت',
                       suffixIcon: IconButton(
                         tooltip: 'افزودن در کالا و موجودی',
-                        onPressed: widget.onOpenProducts == null
-                            ? null
-                            : () {
-                                Navigator.pop(context, false);
-                                widget.onOpenProducts!.call();
-                              },
+                        onPressed: () async {
+                          final product = await showCrmProductEditor(
+                            context,
+                            store: widget.store,
+                          );
+                          if (product == null || !mounted) return;
+                          setState(() {
+                            _productName = product.name;
+                            _unitPrice.text = formatPersianInteger(
+                              product.unitPrice,
+                              grouping: true,
+                            );
+                          });
+                        },
                         icon: const Icon(Icons.add_box_outlined),
                       ),
                     ),

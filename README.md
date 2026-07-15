@@ -42,6 +42,17 @@ until the SDK version or `pubspec.lock` changes.
 The application contains no pre-seeded CRM records or sample account. Its first
 login requires an administrator created by the server installer.
 
+## Unified CRM workspace
+
+Operational lists use the same configurable data grid with per-user saved
+column order, visibility, width, frozen columns, multi-step sorting, advanced
+filters, row selection, copying, pagination, and reusable filters. Reports open
+in a configurable preview before printing and support summary or detailed
+views, reusable personal/shared templates, and PDF, Excel, and CSV exports.
+Customers also expose a chronological activity timeline. Customers, calls,
+opportunities, quotes, orders, and invoices support synchronized attachments,
+while important changes are recorded in the visible audit history.
+
 ## User preferences
 
 Settings include light/dark/system mode, five accent colors, collapsible left

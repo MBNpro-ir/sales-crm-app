@@ -757,6 +757,128 @@ class CrmOrder {
   }
 }
 
+class CrmAttachment {
+  const CrmAttachment({
+    required this.id,
+    required this.entityType,
+    required this.entityId,
+    required this.fileName,
+    required this.extension,
+    required this.sizeBytes,
+    required this.contentBase64,
+    required this.uploadedBy,
+    required this.updatedAt,
+    this.deleted = false,
+  });
+
+  final String id;
+  final String entityType;
+  final String entityId;
+  final String fileName;
+  final String extension;
+  final int sizeBytes;
+  final String contentBase64;
+  final String uploadedBy;
+  final DateTime updatedAt;
+  final bool deleted;
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'entity_type': entityType,
+    'entity_id': entityId,
+    'file_name': fileName,
+    'extension': extension,
+    'size_bytes': sizeBytes,
+    'content_base64': contentBase64,
+    'uploaded_by': uploadedBy,
+    'updated_at': updatedAt.toUtc().toIso8601String(),
+    'deleted': deleted,
+  };
+
+  CrmAttachment copyWith({DateTime? updatedAt, bool? deleted}) {
+    return CrmAttachment(
+      id: id,
+      entityType: entityType,
+      entityId: entityId,
+      fileName: fileName,
+      extension: extension,
+      sizeBytes: sizeBytes,
+      contentBase64: contentBase64,
+      uploadedBy: uploadedBy,
+      updatedAt: updatedAt ?? this.updatedAt,
+      deleted: deleted ?? this.deleted,
+    );
+  }
+
+  factory CrmAttachment.fromJson(Map<String, dynamic> value) {
+    return CrmAttachment(
+      id: _text(value['id']),
+      entityType: _text(value['entity_type']),
+      entityId: _text(value['entity_id']),
+      fileName: _text(value['file_name']),
+      extension: _text(value['extension']),
+      sizeBytes: _number(value['size_bytes']),
+      contentBase64: _text(value['content_base64']),
+      uploadedBy: _text(value['uploaded_by']),
+      updatedAt: _date(value['updated_at']),
+      deleted: value['deleted'] == true || value['is_deleted'] == 1,
+    );
+  }
+}
+
+class CrmAuditEntry {
+  const CrmAuditEntry({
+    required this.id,
+    required this.entityType,
+    required this.entityId,
+    required this.action,
+    required this.userName,
+    required this.oldValue,
+    required this.newValue,
+    required this.updatedAt,
+    this.deleted = false,
+  });
+
+  final String id;
+  final String entityType;
+  final String entityId;
+  final String action;
+  final String userName;
+  final Map<String, dynamic> oldValue;
+  final Map<String, dynamic> newValue;
+  final DateTime updatedAt;
+  final bool deleted;
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'entity_type': entityType,
+    'entity_id': entityId,
+    'action': action,
+    'user_name': userName,
+    'old_value': oldValue,
+    'new_value': newValue,
+    'updated_at': updatedAt.toUtc().toIso8601String(),
+    'deleted': deleted,
+  };
+
+  factory CrmAuditEntry.fromJson(Map<String, dynamic> value) {
+    Map<String, dynamic> map(Object? raw) => raw is Map
+        ? raw.map((key, item) => MapEntry(key.toString(), item))
+        : <String, dynamic>{};
+    return CrmAuditEntry(
+      id: _text(value['id']),
+      entityType: _text(value['entity_type']),
+      entityId: _text(value['entity_id']),
+      action: _text(value['action']),
+      userName: _text(value['user_name']),
+      oldValue: map(value['old_value']),
+      newValue: map(value['new_value']),
+      updatedAt: _date(value['updated_at']),
+      deleted: value['deleted'] == true || value['is_deleted'] == 1,
+    );
+  }
+}
+
 class SyncChange {
   const SyncChange({
     required this.entityType,

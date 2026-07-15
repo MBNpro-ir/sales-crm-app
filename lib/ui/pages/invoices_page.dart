@@ -4,6 +4,7 @@ import '../../core/crm_store.dart';
 import '../../core/models.dart';
 import '../../core/report_service.dart';
 import '../widgets/common.dart';
+import '../widgets/entity_tools.dart';
 import 'documents_page.dart';
 
 class InvoicesPage extends StatefulWidget {
@@ -199,7 +200,15 @@ class _InvoicesPageState extends State<InvoicesPage> {
             ),
           ],
         ),
-        const SizedBox(height: 20),
+        const SizedBox(height: 12),
+        CrmPageToolbar(
+          onNew: _newInvoice,
+          onReport: _printReport,
+          onRefresh: widget.store.refresh,
+          onSearch: () => setState(() {}),
+          onAdvancedFilter: () => setState(() {}),
+        ),
+        const SizedBox(height: 18),
         Wrap(
           spacing: 14,
           runSpacing: 14,
@@ -333,23 +342,65 @@ class _InvoicesPageState extends State<InvoicesPage> {
                       value: (_) => '',
                       canHide: false,
                       filterable: false,
-                      cell: (context, entry) => Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          if (entry.status != 'فاکتور صادر شد')
-                            FilledButton.tonal(
-                              onPressed: () => _issue(entry),
-                              child: const Text('صدور'),
-                            ),
-                          IconButton(
-                            onPressed: () => _print(entry),
-                            tooltip: 'چاپ فاکتور',
-                            icon: const Icon(Icons.print_outlined),
+                      cell: (context, entry) => PopupMenuButton<String>(
+                        tooltip: 'عملیات فاکتور',
+                        onSelected: (value) {
+                          if (value == 'view' || value == 'print') {
+                            _print(entry);
+                          }
+                          if (value == 'edit') _edit(entry);
+                          if (value == 'note') _edit(entry);
+                          if (value == 'issue') _issue(entry);
+                          if (value == 'attachments') {
+                            showCrmAttachmentManager(
+                              context,
+                              store: widget.store,
+                              entityType: 'invoice',
+                              entityId: entry.id,
+                              title: entry.number,
+                            );
+                          }
+                          if (value == 'history') {
+                            showCrmAuditLog(
+                              context,
+                              store: widget.store,
+                              entityType: entry.order != null
+                                  ? 'order'
+                                  : 'quote',
+                              entityId: entry.id,
+                              title: entry.number,
+                            );
+                          }
+                        },
+                        itemBuilder: (context) => [
+                          const PopupMenuItem(
+                            value: 'view',
+                            child: Text('مشاهده'),
                           ),
-                          IconButton(
-                            onPressed: () => _edit(entry),
-                            tooltip: 'ویرایش سند منبع',
-                            icon: const Icon(Icons.edit_outlined),
+                          const PopupMenuItem(
+                            value: 'edit',
+                            child: Text('ویرایش'),
+                          ),
+                          const PopupMenuItem(
+                            value: 'note',
+                            child: Text('یادداشت'),
+                          ),
+                          if (entry.status != 'فاکتور صادر شد')
+                            const PopupMenuItem(
+                              value: 'issue',
+                              child: Text('صدور فاکتور'),
+                            ),
+                          const PopupMenuItem(
+                            value: 'print',
+                            child: Text('گزارش و چاپ'),
+                          ),
+                          const PopupMenuItem(
+                            value: 'attachments',
+                            child: Text('فایل‌های پیوست'),
+                          ),
+                          const PopupMenuItem(
+                            value: 'history',
+                            child: Text('تاریخچه'),
                           ),
                         ],
                       ),
@@ -371,6 +422,7 @@ class _InvoiceEntry {
   final CrmQuote? quote;
   final CrmOrder? order;
 
+  String get id => quote?.id ?? order!.id;
   String get sourceLabel => quote != null ? 'پیش‌فاکتور' : 'سفارش / فاکتور';
   String get number => quote?.quoteNumber ?? order!.orderNumber;
   String get customer => quote?.customerName ?? order!.customerName;

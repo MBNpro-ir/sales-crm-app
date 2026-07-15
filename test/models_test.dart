@@ -121,4 +121,39 @@ void main() {
     expect(quote.lineItems.single.totalAmount, 990000);
     expect((quote.toJson()['line_items'] as List).length, 1);
   });
+
+  test('attachments preserve content and entity ownership through JSON', () {
+    final attachment = CrmAttachment.fromJson({
+      'id': 'attachment-1',
+      'entity_type': 'customer',
+      'entity_id': 'customer-1',
+      'file_name': 'contract.pdf',
+      'extension': 'pdf',
+      'size_bytes': 4,
+      'content_base64': 'dGVzdA==',
+      'uploaded_by': 'مدیر',
+      'updated_at': '2026-07-15T09:30:00.000Z',
+    });
+
+    expect(attachment.entityType, 'customer');
+    expect(attachment.contentBase64, 'dGVzdA==');
+    expect(attachment.toJson()['size_bytes'], 4);
+  });
+
+  test('audit log preserves old and new values through JSON', () {
+    final entry = CrmAuditEntry.fromJson({
+      'id': 'audit-1',
+      'entity_type': 'customer',
+      'entity_id': 'customer-1',
+      'action': 'ویرایش',
+      'user_name': 'مدیر',
+      'old_value': {'status': 'فعال'},
+      'new_value': {'status': 'غیرفعال'},
+      'updated_at': '2026-07-15T09:30:00.000Z',
+    });
+
+    expect(entry.oldValue['status'], 'فعال');
+    expect(entry.newValue['status'], 'غیرفعال');
+    expect(entry.toJson()['user_name'], 'مدیر');
+  });
 }

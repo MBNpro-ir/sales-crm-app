@@ -12,6 +12,8 @@ class LocalDatabase {
     'task',
     'quote',
     'order',
+    'attachment',
+    'audit_log',
   };
 
   Database? _database;
@@ -287,6 +289,14 @@ class LocalDatabase {
     return _records('order', CrmOrder.fromJson);
   }
 
+  Future<List<CrmAttachment>> attachments() {
+    return _records('attachment', CrmAttachment.fromJson);
+  }
+
+  Future<List<CrmAuditEntry>> auditEntries() {
+    return _records('audit_log', CrmAuditEntry.fromJson);
+  }
+
   Future<List<T>> _records<T>(
     String entityType,
     T Function(Map<String, dynamic>) decoder,
@@ -409,6 +419,28 @@ class LocalDatabase {
       payload: order.toJson(),
       updatedAt: order.updatedAt,
       deleted: order.deleted,
+      queue: true,
+    );
+  }
+
+  Future<void> saveAttachment(CrmAttachment attachment) {
+    return _saveRecord(
+      entityType: 'attachment',
+      id: attachment.id,
+      payload: attachment.toJson(),
+      updatedAt: attachment.updatedAt,
+      deleted: attachment.deleted,
+      queue: true,
+    );
+  }
+
+  Future<void> saveAuditEntry(CrmAuditEntry entry) {
+    return _saveRecord(
+      entityType: 'audit_log',
+      id: entry.id,
+      payload: entry.toJson(),
+      updatedAt: entry.updatedAt,
+      deleted: entry.deleted,
       queue: true,
     );
   }
