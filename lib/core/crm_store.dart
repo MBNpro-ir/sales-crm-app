@@ -44,6 +44,7 @@ class CrmStore extends ChangeNotifier {
   List<CrmOrder> _orders = const [];
   List<CrmAttachment> _attachments = const [];
   List<CrmAuditEntry> _auditEntries = const [];
+  List<CrmReportTemplate> _reportTemplates = const [];
   List<String> _activityTypes = const [
     'تولیدکننده',
     'مصرف‌کننده',
@@ -105,6 +106,8 @@ class CrmStore extends ChangeNotifier {
   List<CrmOrder> get orders => List.unmodifiable(_orders);
   List<CrmAttachment> get attachments => List.unmodifiable(_attachments);
   List<CrmAuditEntry> get auditEntries => List.unmodifiable(_auditEntries);
+  List<CrmReportTemplate> get reportTemplates =>
+      List.unmodifiable(_reportTemplates);
   List<String> get activityTypes => List.unmodifiable(_activityTypes);
   List<String> get customerStatuses => List.unmodifiable(_customerStatuses);
   List<String> get customerPriorities => List.unmodifiable(_customerPriorities);
@@ -119,6 +122,13 @@ class CrmStore extends ChangeNotifier {
   String? get organizationId => _organizationId;
   String get apiBaseUrl => _api.baseUrl;
   int get pendingOutboxCount => _pendingOutboxCount;
+  String get reportTemplateOwnerKey {
+    final organization = _organizationId ?? 'offline';
+    final user = _userPreferenceId.trim().isEmpty
+        ? 'offline'
+        : _userPreferenceId.trim();
+    return '$organization::$user';
+  }
 
   int get activeCustomers =>
       _customers.where((customer) => customer.status == 'فعال').length;
@@ -240,6 +250,7 @@ class CrmStore extends ChangeNotifier {
     _orders = await _database.orders();
     _attachments = await _database.attachments();
     _auditEntries = await _database.auditEntries();
+    _reportTemplates = await _database.reportTemplates();
     _pendingOutboxCount = (await _database.pendingChanges()).length;
     notifyListeners();
   }
@@ -661,51 +672,86 @@ class CrmStore extends ChangeNotifier {
       final name = (row['name'] ?? '').trim();
       final company = (row['company'] ?? '').trim();
       final mobile = (row['mobile'] ?? '').trim();
-      if (name.isEmpty && company.isEmpty && mobile.isEmpty) continue;
+      final customerCode = (row['customer_code'] ?? '').trim();
+      if (name.isEmpty &&
+          company.isEmpty &&
+          mobile.isEmpty &&
+          customerCode.isEmpty) {
+        continue;
+      }
       final current = _customers.cast<CrmCustomer?>().firstWhere(
         (item) =>
             item != null &&
             ((mobile.isNotEmpty && item.mobile == mobile) ||
-                ((row['customer_code'] ?? '').isNotEmpty &&
-                    item.customerCode == row['customer_code'])),
+                (customerCode.isNotEmpty && item.customerCode == customerCode)),
         orElse: () => null,
       );
+      if (current == null && name.isEmpty && company.isEmpty) continue;
+      String importedValue(String key, String fallback) =>
+          row.containsKey(key) ? (row[key] ?? '').trim() : fallback;
+      String nonEmptyValue(String key, String fallback) {
+        final value = importedValue(key, fallback);
+        return value.isEmpty ? fallback : value;
+      }
+
+      final rawVipValue = importedValue(
+        'is_vip',
+        current?.isVip == true ? 'true' : 'false',
+      );
+      final rawVip = rawVipValue.isEmpty
+          ? (current?.isVip == true ? 'true' : 'false')
+          : rawVipValue;
       final details = <String, String>{
         ...?current?.details,
-        'customer_code': (row['customer_code'] ?? '').trim().isEmpty
-            ? 'M-${(++nextSequence).toString().padLeft(6, '0')}'
-            : (row['customer_code'] ?? '').trim(),
-        'is_vip':
-            (row['is_vip'] ?? '').trim() == 'بله' ||
-                (row['is_vip'] ?? '').trim().toLowerCase() == 'true'
+        'customer_code': customerCode.isNotEmpty
+            ? customerCode
+            : current?.customerCode.isNotEmpty == true
+            ? current!.customerCode
+            : 'M-${(++nextSequence).toString().padLeft(6, '0')}',
+        'is_vip': rawVip == 'بله' || rawVip.toLowerCase() == 'true'
             ? 'true'
             : 'false',
-        'email': (row['email'] ?? '').trim(),
-        'address': (row['address'] ?? '').trim(),
+        for (final key in const [
+          'email',
+          'secondary_mobile',
+          'national_id',
+          'district',
+          'address',
+          'postal_code',
+          'source',
+          'interested_products',
+          'monthly_volume',
+          'payment_terms',
+          'fax',
+          'website',
+        ])
+          key: importedValue(key, current?.details[key] ?? ''),
       };
       final importedCustomer = CrmCustomer(
         id: current?.id ?? _uuid.v4(),
-        name: name.isEmpty ? company : name,
-        company: company,
-        mobile: mobile,
-        phone: (row['phone'] ?? '').trim(),
-        province: (row['province'] ?? '').trim(),
-        city: (row['city'] ?? '').trim(),
-        activityType: (row['activity_type'] ?? '').trim().isEmpty
-            ? 'سایر'
-            : (row['activity_type'] ?? '').trim(),
-        status: (row['status'] ?? '').trim().isEmpty
-            ? 'فعال'
-            : (row['status'] ?? '').trim(),
-        priority: (row['priority'] ?? '').trim().isEmpty
-            ? 'متوسط'
-            : (row['priority'] ?? '').trim(),
-        notes: (row['notes'] ?? '').trim(),
-        tags: (row['tags'] ?? '')
-            .split(',')
-            .map((item) => item.trim())
-            .where((item) => item.isNotEmpty)
-            .toList(),
+        name: nonEmptyValue(
+          'name',
+          current?.name ?? (company.isEmpty ? name : company),
+        ),
+        company: importedValue('company', current?.company ?? company),
+        mobile: importedValue('mobile', current?.mobile ?? mobile),
+        phone: importedValue('phone', current?.phone ?? ''),
+        province: importedValue('province', current?.province ?? ''),
+        city: importedValue('city', current?.city ?? ''),
+        activityType: nonEmptyValue(
+          'activity_type',
+          current?.activityType ?? 'سایر',
+        ),
+        status: nonEmptyValue('status', current?.status ?? 'فعال'),
+        priority: nonEmptyValue('priority', current?.priority ?? 'متوسط'),
+        notes: importedValue('notes', current?.notes ?? ''),
+        tags: row.containsKey('tags')
+            ? (row['tags'] ?? '')
+                  .split(RegExp(r'[,،]'))
+                  .map((item) => item.trim())
+                  .where((item) => item.isNotEmpty)
+                  .toList()
+            : current?.tags ?? const [],
         details: details,
         updatedAt: DateTime.now(),
       );
@@ -1151,6 +1197,50 @@ class CrmStore extends ChangeNotifier {
     );
   }
 
+  Future<void> saveReportTemplate({
+    required String reportTitle,
+    required String name,
+    required bool shared,
+    required Map<String, dynamic> settings,
+    String? id,
+  }) async {
+    final template = CrmReportTemplate(
+      id: id ?? _uuid.v4(),
+      reportTitle: reportTitle,
+      name: name.trim(),
+      ownerKey: reportTemplateOwnerKey,
+      ownerName: _userName,
+      shared: shared,
+      settings: settings,
+      updatedAt: DateTime.now(),
+    );
+    await _database.saveReportTemplate(template);
+    await _recordAudit(
+      entityType: 'report_template',
+      entityId: template.id,
+      action: id == null ? 'ایجاد قالب گزارش' : 'ویرایش قالب گزارش',
+      oldValue: _reportTemplates
+          .where((item) => item.id == id)
+          .firstOrNull
+          ?.toJson(),
+      newValue: template.toJson(),
+    );
+    await _afterLocalMutation();
+  }
+
+  Future<void> deleteReportTemplate(CrmReportTemplate template) async {
+    await _database.saveReportTemplate(
+      template.copyWith(updatedAt: DateTime.now(), deleted: true),
+    );
+    await _recordAudit(
+      entityType: 'report_template',
+      entityId: template.id,
+      action: 'حذف قالب گزارش',
+      oldValue: template.toJson(),
+    );
+    await _afterLocalMutation();
+  }
+
   Future<void> deleteCustomer(CrmCustomer item) async {
     await _database.saveCustomer(
       item.copyWith(deleted: true, updatedAt: DateTime.now()),
@@ -1422,6 +1512,7 @@ class CrmStore extends ChangeNotifier {
     _orders = const [];
     _attachments = const [];
     _auditEntries = const [];
+    _reportTemplates = const [];
     _pendingOutboxCount = 0;
   }
 

@@ -20,8 +20,11 @@ class DocumentsPage extends StatefulWidget {
 
 class _DocumentsPageState extends State<DocumentsPage> {
   final _search = TextEditingController();
+  final _gridController = CrmDataGridController();
   String? _statusFilter;
   String? _directionFilter;
+  List<CrmQuote> _selectedQuotes = const [];
+  List<CrmOrder> _selectedOrders = const [];
 
   bool get _isQuote => widget.mode == DocumentPageMode.quote;
   String get _title => _isQuote ? 'پیش‌فاکتورها' : 'سفارش‌ها';
@@ -86,6 +89,43 @@ class _DocumentsPageState extends State<DocumentsPage> {
     );
   }
 
+  Future<void> _convertQuote(CrmQuote item, {bool issueInvoice = false}) async {
+    final existing = widget.store.orders.where(
+      (order) => order.sourceType == 'quote' && order.sourceId == item.id,
+    );
+    if (existing.isNotEmpty) {
+      showCrmNotice(
+        context,
+        'این پیش‌فاکتور قبلاً به سفارش تبدیل شده است.',
+        type: CrmNoticeType.warning,
+      );
+      return;
+    }
+    final customer = widget.store.customers.firstWhere(
+      (value) => value.id == item.customerId,
+    );
+    await widget.store.saveOrder(
+      customer: customer,
+      direction: item.direction,
+      status: issueInvoice ? 'فاکتور صادر شد' : 'در انتظار تایید',
+      totalAmount: item.totalAmount,
+      notes: item.notes,
+      lineItems: item.lineItems,
+      sourceType: 'quote',
+      sourceId: item.id,
+    );
+    await _setQuoteStatus(item, issueInvoice ? 'فاکتور صادر شد' : 'تایید شده');
+    if (mounted) {
+      showCrmNotice(
+        context,
+        issueInvoice
+            ? 'سفارش و فاکتور از پیش‌فاکتور صادر شد.'
+            : 'پیش‌فاکتور به سفارش تبدیل شد.',
+        type: CrmNoticeType.success,
+      );
+    }
+  }
+
   Future<void> _setOrderStatus(CrmOrder item, String status) async {
     final customer = widget.store.customers.firstWhere(
       (value) => value.id == item.customerId,
@@ -107,6 +147,7 @@ class _DocumentsPageState extends State<DocumentsPage> {
 
   Future<void> _printQuote(CrmQuote item) => CrmReportService.printDocument(
     context: context,
+    store: widget.store,
     title: 'پیش‌فاکتور ${item.direction}',
     number: item.quoteNumber,
     customer: item.customerName,
@@ -119,6 +160,7 @@ class _DocumentsPageState extends State<DocumentsPage> {
 
   Future<void> _printOrder(CrmOrder item) => CrmReportService.printDocument(
     context: context,
+    store: widget.store,
     title: 'سفارش ${item.direction}',
     number: item.orderNumber,
     customer: item.customerName,
@@ -161,6 +203,7 @@ class _DocumentsPageState extends State<DocumentsPage> {
               .toList();
     return CrmReportService.printTable(
       context: context,
+      store: widget.store,
       title: 'گزارش $_title',
       headers: const [
         'شماره',
@@ -259,10 +302,31 @@ class _DocumentsPageState extends State<DocumentsPage> {
         const SizedBox(height: 12),
         CrmPageToolbar(
           onNew: () => _openEditor(),
+          onEdit: _isQuote
+              ? _selectedQuotes.length == 1
+                    ? () => _openEditor(quote: _selectedQuotes.single)
+                    : null
+              : _selectedOrders.length == 1
+              ? () => _openEditor(order: _selectedOrders.single)
+              : null,
+          onDelete: _isQuote
+              ? _selectedQuotes.length == 1
+                    ? () => _deleteQuote(_selectedQuotes.single)
+                    : null
+              : _selectedOrders.length == 1
+              ? () => _deleteOrder(_selectedOrders.single)
+              : null,
+          onView: _isQuote
+              ? _selectedQuotes.length == 1
+                    ? () => _printQuote(_selectedQuotes.single)
+                    : null
+              : _selectedOrders.length == 1
+              ? () => _printOrder(_selectedOrders.single)
+              : null,
           onReport: _printReport,
           onRefresh: widget.store.refresh,
-          onSearch: () => setState(() {}),
-          onAdvancedFilter: () => setState(() {}),
+          onSearch: _gridController.showSearch,
+          onAdvancedFilter: _gridController.showAdvancedFilter,
         ),
         const SizedBox(height: 18),
         Wrap(
@@ -407,6 +471,9 @@ class _DocumentsPageState extends State<DocumentsPage> {
     return CrmConfigurableDataTable<CrmQuote>(
       tableId: 'quotes',
       rows: items,
+      controller: _gridController,
+      rowKey: (item) => item.id,
+      onSelectionChanged: (items) => setState(() => _selectedQuotes = items),
       initialSortColumnId: 'number',
       initialSortAscending: false,
       columns: [
@@ -469,6 +536,10 @@ class _DocumentsPageState extends State<DocumentsPage> {
               if (value == 'note') _openEditor(quote: item);
               if (value == 'approve') _setQuoteStatus(item, 'تایید شده');
               if (value == 'reject') _setQuoteStatus(item, 'رد شده');
+              if (value == 'order') _convertQuote(item);
+              if (value == 'invoice') {
+                _convertQuote(item, issueInvoice: true);
+              }
               if (value == 'attachments') {
                 showCrmAttachmentManager(
                   context,
@@ -496,6 +567,8 @@ class _DocumentsPageState extends State<DocumentsPage> {
               PopupMenuItem(value: 'print', child: Text('گزارش و چاپ')),
               PopupMenuItem(value: 'approve', child: Text('تایید پیش‌فاکتور')),
               PopupMenuItem(value: 'reject', child: Text('رد پیش‌فاکتور')),
+              PopupMenuItem(value: 'order', child: Text('ایجاد سفارش')),
+              PopupMenuItem(value: 'invoice', child: Text('صدور فاکتور')),
               PopupMenuItem(
                 value: 'attachments',
                 child: Text('فایل‌های پیوست'),
@@ -521,6 +594,9 @@ class _DocumentsPageState extends State<DocumentsPage> {
     return CrmConfigurableDataTable<CrmOrder>(
       tableId: 'orders',
       rows: items,
+      controller: _gridController,
+      rowKey: (item) => item.id,
+      onSelectionChanged: (items) => setState(() => _selectedOrders = items),
       initialSortColumnId: 'date',
       initialSortAscending: false,
       columns: [

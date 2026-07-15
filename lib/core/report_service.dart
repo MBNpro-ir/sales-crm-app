@@ -7,10 +7,10 @@ import 'package:flutter/services.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
+import 'crm_store.dart';
 import 'models.dart';
-import 'persian_format.dart';
+import '../ui/widgets/common.dart';
 
 class CrmReportService {
   const CrmReportService._();
@@ -169,6 +169,7 @@ class CrmReportService {
   /// total/certain/detail views behave consistently across the application.
   static Future<void> printTable({
     required BuildContext context,
+    required CrmStore store,
     required String title,
     required List<String> headers,
     required List<List<Object?>> rows,
@@ -178,6 +179,7 @@ class CrmReportService {
   }) async {
     final prepared = await _showTablePreview(
       context: context,
+      store: store,
       title: title,
       subtitle: subtitle,
       headers: headers,
@@ -191,6 +193,7 @@ class CrmReportService {
 
   static Future<void> printDocument({
     required BuildContext context,
+    required CrmStore store,
     required String title,
     required String number,
     required String customer,
@@ -216,6 +219,7 @@ class CrmReportService {
         .toList();
     final prepared = await _showTablePreview(
       context: context,
+      store: store,
       title: '$title $number',
       subtitle:
           'طرف حساب: $customer | نوع: $direction | وضعیت: $status${notes.trim().isEmpty ? '' : ' | توضیحات: $notes'}',
@@ -267,7 +271,12 @@ class CrmReportService {
                 if (prepared.rows.isEmpty)
                   pw.Text('ردیفی برای نمایش انتخاب نشده است.')
                 else
-                  _table(prepared.headers, prepared.rows, fonts),
+                  _table(
+                    prepared.headers,
+                    prepared.rows,
+                    fonts,
+                    columnWidths: prepared.columnWidths,
+                  ),
                 pw.SizedBox(height: 14),
                 pw.Text(
                   'جمع مبلغ کل سند: ${formatPersianInteger(totalAmount, grouping: true)} ریال',
@@ -292,6 +301,7 @@ class CrmReportService {
 
   static Future<_PreparedReport?> _showTablePreview({
     required BuildContext context,
+    required CrmStore store,
     required String title,
     required String subtitle,
     required List<String> headers,
@@ -304,6 +314,7 @@ class CrmReportService {
       barrierDismissible: false,
       builder: (context) => _ReportPreviewDialog(
         title: title,
+        store: store,
         subtitle: subtitle,
         headers: headers,
         rows: rows,
@@ -342,7 +353,12 @@ class CrmReportService {
                   ),
                 ],
                 pw.SizedBox(height: 14),
-                _table(report.headers, report.rows, fonts),
+                _table(
+                  report.headers,
+                  report.rows,
+                  fonts,
+                  columnWidths: report.columnWidths,
+                ),
               ],
             ),
           ),
@@ -388,7 +404,12 @@ class CrmReportService {
                   ),
                 ],
                 pw.SizedBox(height: 14),
-                _table(report.headers, report.rows, fonts),
+                _table(
+                  report.headers,
+                  report.rows,
+                  fonts,
+                  columnWidths: report.columnWidths,
+                ),
               ],
             ),
           ),
@@ -406,8 +427,9 @@ class CrmReportService {
   static pw.Widget _table(
     List<String> headers,
     List<List<Object?>> rows,
-    (pw.Font, pw.Font) fonts,
-  ) {
+    (pw.Font, pw.Font) fonts, {
+    List<double>? columnWidths,
+  }) {
     pw.Widget cell(Object? value, {bool heading = false}) => pw.Padding(
       padding: const pw.EdgeInsets.symmetric(horizontal: 4, vertical: 5),
       child: pw.Text(
@@ -418,6 +440,12 @@ class CrmReportService {
     );
     return pw.Table(
       border: pw.TableBorder.all(color: PdfColors.grey500, width: 0.5),
+      columnWidths: columnWidths == null
+          ? const {}
+          : {
+              for (var index = 0; index < columnWidths.length; index++)
+                index: pw.FlexColumnWidth(columnWidths[index]),
+            },
       children: [
         pw.TableRow(
           decoration: const pw.BoxDecoration(color: PdfColors.grey200),
@@ -458,15 +486,18 @@ class _PreparedReport {
     required this.headers,
     required this.rows,
     required this.subtitle,
+    required this.columnWidths,
   });
 
   final List<String> headers;
   final List<List<Object?>> rows;
   final String subtitle;
+  final List<double> columnWidths;
 }
 
 class _ReportPreviewDialog extends StatefulWidget {
   const _ReportPreviewDialog({
+    required this.store,
     required this.title,
     required this.subtitle,
     required this.headers,
@@ -475,6 +506,7 @@ class _ReportPreviewDialog extends StatefulWidget {
     required this.numericColumns,
   });
 
+  final CrmStore store;
   final String title;
   final String subtitle;
   final List<String> headers;
@@ -493,7 +525,6 @@ class _ReportPreviewDialogState extends State<_ReportPreviewDialog> {
   late Map<int, TextEditingController> _filters;
   late Map<int, double> _widths;
   List<_ReportSort> _sorts = const [];
-  String _preferenceScope = 'offline';
   DateTime? _from;
   DateTime? _to;
   String _level = 'تفصیلی';
@@ -509,16 +540,6 @@ class _ReportPreviewDialogState extends State<_ReportPreviewDialog> {
     _filters = {for (final index in _order) index: TextEditingController()};
     _widths = {for (final index in _order) index: 150};
     _groupColumn = _order.isEmpty ? null : _order.first;
-    _loadPreferenceScope();
-  }
-
-  Future<void> _loadPreferenceScope() async {
-    final preferences = await SharedPreferences.getInstance();
-    if (!mounted) return;
-    setState(() {
-      _preferenceScope =
-          preferences.getString('crm_active_user_scope') ?? 'offline';
-    });
   }
 
   @override
@@ -603,6 +624,7 @@ class _ReportPreviewDialogState extends State<_ReportPreviewDialog> {
             )
             .toList(),
         subtitle: subtitle,
+        columnWidths: columns.map((index) => _widths[index] ?? 150).toList(),
       );
     }
     final includeDay = _level == 'معین' && widget.rowDates != null;
@@ -640,7 +662,12 @@ class _ReportPreviewDialogState extends State<_ReportPreviewDialog> {
         ),
       ];
     }).toList();
-    return _PreparedReport(headers: headers, rows: rows, subtitle: subtitle);
+    return _PreparedReport(
+      headers: headers,
+      rows: rows,
+      subtitle: subtitle,
+      columnWidths: List<double>.filled(headers.length, 150),
+    );
   }
 
   Future<void> _pickDate({required bool from}) async {
@@ -763,9 +790,6 @@ class _ReportPreviewDialogState extends State<_ReportPreviewDialog> {
     }
   }
 
-  String get _personalTemplateKey => 'crm_report_templates_$_preferenceScope';
-  static const _sharedTemplateKey = 'crm_report_templates_shared';
-
   Future<void> _saveTemplate() async {
     final name = TextEditingController();
     var shared = false;
@@ -789,7 +813,7 @@ class _ReportPreviewDialogState extends State<_ReportPreviewDialog> {
                   value: shared,
                   title: const Text('اشتراک قالب بین کاربران'),
                   subtitle: const Text(
-                    'کاربران این دستگاه می‌توانند قالب را استفاده کنند.',
+                    'قالب از طریق سرور با کاربران این فضای کاری همگام می‌شود.',
                   ),
                   onChanged: (value) => setDialogState(() => shared = value),
                 ),
@@ -812,34 +836,34 @@ class _ReportPreviewDialogState extends State<_ReportPreviewDialog> {
     final templateName = name.text.trim();
     name.dispose();
     if (accepted != true || templateName.isEmpty) return;
-    final preferences = await SharedPreferences.getInstance();
-    final key = shared ? _sharedTemplateKey : _personalTemplateKey;
-    final raw = preferences.getString(key);
-    final templates = raw == null
-        ? <Map<String, dynamic>>[]
-        : (jsonDecode(raw) as List)
-              .whereType<Map>()
-              .map((item) => Map<String, dynamic>.from(item))
-              .toList();
-    templates.removeWhere(
-      (item) =>
-          item['report_title'] == widget.title && item['name'] == templateName,
+    final existing = widget.store.reportTemplates
+        .where(
+          (item) =>
+              item.reportTitle == widget.title &&
+              item.name == templateName &&
+              item.ownerKey == widget.store.reportTemplateOwnerKey,
+        )
+        .firstOrNull;
+    await widget.store.saveReportTemplate(
+      id: existing?.id,
+      reportTitle: widget.title,
+      name: templateName,
+      shared: shared,
+      settings: {
+        'order': _order,
+        'visible': _visible.toList(),
+        'widths': _widths.map((key, value) => MapEntry(key.toString(), value)),
+        'filters': _filters.map(
+          (key, value) => MapEntry(key.toString(), value.text),
+        ),
+        'search': _search.text,
+        'from': _from?.toUtc().toIso8601String(),
+        'to': _to?.toUtc().toIso8601String(),
+        'level': _level,
+        'group': _groupColumn,
+        'sorts': _sorts.map((item) => item.toJson()).toList(),
+      },
     );
-    templates.add({
-      'report_title': widget.title,
-      'name': templateName,
-      'shared': shared,
-      'order': _order,
-      'visible': _visible.toList(),
-      'widths': _widths.map((key, value) => MapEntry(key.toString(), value)),
-      'filters': _filters.map(
-        (key, value) => MapEntry(key.toString(), value.text),
-      ),
-      'level': _level,
-      'group': _groupColumn,
-      'sorts': _sorts.map((item) => item.toJson()).toList(),
-    });
-    await preferences.setString(key, jsonEncode(templates));
     if (mounted) {
       ScaffoldMessenger.of(
         context,
@@ -848,23 +872,18 @@ class _ReportPreviewDialogState extends State<_ReportPreviewDialog> {
   }
 
   Future<void> _loadTemplate() async {
-    final preferences = await SharedPreferences.getInstance();
-    List<Map<String, dynamic>> read(String key) {
-      final raw = preferences.getString(key);
-      if (raw == null) return [];
-      return (jsonDecode(raw) as List)
-          .whereType<Map>()
-          .map((item) => Map<String, dynamic>.from(item))
-          .where((item) => item['report_title'] == widget.title)
-          .toList();
-    }
-
-    final templates = [
-      ...read(_personalTemplateKey),
-      ...read(_sharedTemplateKey),
-    ];
+    final templates =
+        widget.store.reportTemplates
+            .where(
+              (item) =>
+                  item.reportTitle == widget.title &&
+                  (item.shared ||
+                      item.ownerKey == widget.store.reportTemplateOwnerKey),
+            )
+            .toList()
+          ..sort((left, right) => right.updatedAt.compareTo(left.updatedAt));
     if (!mounted) return;
-    final selected = await showDialog<Map<String, dynamic>>(
+    final selected = await showDialog<CrmReportTemplate>(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('قالب‌های گزارش'),
@@ -881,15 +900,28 @@ class _ReportPreviewDialogState extends State<_ReportPreviewDialog> {
                     final item = templates[index];
                     return ListTile(
                       leading: Icon(
-                        item['shared'] == true
+                        item.shared
                             ? Icons.groups_outlined
                             : Icons.person_outline_rounded,
                       ),
-                      title: Text(item['name']?.toString() ?? ''),
+                      title: Text(item.name),
                       subtitle: Text(
-                        item['shared'] == true ? 'قالب اشتراکی' : 'قالب شخصی',
+                        item.shared
+                            ? 'قالب اشتراکی — ${item.ownerName}'
+                            : 'قالب شخصی',
                       ),
                       onTap: () => Navigator.pop(context, item),
+                      trailing:
+                          item.ownerKey == widget.store.reportTemplateOwnerKey
+                          ? IconButton(
+                              tooltip: 'حذف قالب',
+                              onPressed: () async {
+                                await widget.store.deleteReportTemplate(item);
+                                if (context.mounted) Navigator.pop(context);
+                              },
+                              icon: const Icon(Icons.delete_outline_rounded),
+                            )
+                          : null,
                     );
                   },
                 ),
@@ -903,28 +935,29 @@ class _ReportPreviewDialogState extends State<_ReportPreviewDialog> {
       ),
     );
     if (selected == null) return;
+    final settings = selected.settings;
     final valid = _order.toSet();
-    final order = (selected['order'] as List? ?? const [])
+    final order = (settings['order'] as List? ?? const [])
         .map((item) => int.tryParse(item.toString()))
         .whereType<int>()
         .where(valid.contains)
         .toList();
-    final visible = (selected['visible'] as List? ?? const [])
+    final visible = (settings['visible'] as List? ?? const [])
         .map((item) => int.tryParse(item.toString()))
         .whereType<int>()
         .where(valid.contains)
         .toSet();
-    final widths = (selected['widths'] as Map? ?? const {}).map(
+    final widths = (settings['widths'] as Map? ?? const {}).map(
       (key, value) => MapEntry(
         int.tryParse(key.toString()) ?? -1,
         double.tryParse(value.toString()) ?? 150,
       ),
     )..remove(-1);
-    final filters = (selected['filters'] as Map? ?? const {}).map(
+    final filters = (settings['filters'] as Map? ?? const {}).map(
       (key, value) =>
           MapEntry(int.tryParse(key.toString()) ?? -1, value.toString()),
     )..remove(-1);
-    final sorts = (selected['sorts'] as List? ?? const [])
+    final sorts = (settings['sorts'] as List? ?? const [])
         .whereType<Map>()
         .map(
           (item) => _ReportSort(
@@ -941,8 +974,11 @@ class _ReportPreviewDialogState extends State<_ReportPreviewDialog> {
       for (final entry in _filters.entries) {
         entry.value.text = filters[entry.key] ?? '';
       }
-      _level = selected['level']?.toString() ?? _level;
-      final group = int.tryParse(selected['group']?.toString() ?? '');
+      _search.text = settings['search']?.toString() ?? '';
+      _from = DateTime.tryParse(settings['from']?.toString() ?? '')?.toLocal();
+      _to = DateTime.tryParse(settings['to']?.toString() ?? '')?.toLocal();
+      _level = settings['level']?.toString() ?? _level;
+      final group = int.tryParse(settings['group']?.toString() ?? '');
       if (group != null && valid.contains(group)) _groupColumn = group;
       _sorts = sorts;
       _sortColumn = sorts.firstOrNull?.column;
@@ -1176,83 +1212,76 @@ class _ReportPreviewDialogState extends State<_ReportPreviewDialog> {
                 clipBehavior: Clip.antiAlias,
                 child: prepared.rows.isEmpty
                     ? const Center(child: Text('ردیفی مطابق تنظیمات پیدا نشد.'))
-                    : Scrollbar(
-                        thumbVisibility: true,
-                        child: SingleChildScrollView(
-                          child: SingleChildScrollView(
-                            scrollDirection: Axis.horizontal,
-                            child: DataTable(
-                              sortColumnIndex:
-                                  _level == 'تفصیلی' &&
-                                      _sortColumn != null &&
-                                      _visible.contains(_sortColumn)
-                                  ? _order
-                                        .where(_visible.contains)
-                                        .toList()
-                                        .indexOf(_sortColumn!)
-                                  : null,
-                              sortAscending: _sortAscending,
-                              columns: prepared.headers.asMap().entries.map((
-                                entry,
-                              ) {
-                                final rawColumns = _order
-                                    .where(_visible.contains)
-                                    .toList();
-                                final rawIndex =
-                                    _level == 'تفصیلی' &&
-                                        entry.key < rawColumns.length
-                                    ? rawColumns[entry.key]
-                                    : null;
-                                return DataColumn(
-                                  label: SizedBox(
-                                    width: rawIndex == null
-                                        ? 150
-                                        : (_widths[rawIndex] ?? 150),
-                                    child: Text(
-                                      entry.value,
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
-                                  ),
-                                  onSort: rawIndex == null
-                                      ? null
-                                      : (_, ascending) => setState(() {
-                                          _sortColumn = rawIndex;
-                                          _sortAscending = ascending;
-                                          _sorts = [
-                                            _ReportSort(rawIndex, ascending),
-                                          ];
-                                        }),
-                                );
-                              }).toList(),
-                              rows: prepared.rows
-                                  .map(
-                                    (row) => DataRow(
-                                      cells: row.asMap().entries.map((entry) {
-                                        final rawColumns = _order
-                                            .where(_visible.contains)
-                                            .toList();
-                                        final width =
-                                            _level == 'تفصیلی' &&
-                                                entry.key < rawColumns.length
-                                            ? (_widths[rawColumns[entry.key]] ??
-                                                  150)
-                                            : 150.0;
-                                        return DataCell(
-                                          SizedBox(
-                                            width: width,
-                                            child: Text(
-                                              entry.value?.toString() ?? '',
-                                              overflow: TextOverflow.ellipsis,
+                    : Builder(
+                        builder: (context) {
+                          final rawColumns = _order
+                              .where(_visible.contains)
+                              .toList();
+                          final detailed = _level == 'تفصیلی';
+                          final columns = prepared.headers.asMap().entries.map((
+                            entry,
+                          ) {
+                            final rawIndex =
+                                detailed && entry.key < rawColumns.length
+                                ? rawColumns[entry.key]
+                                : null;
+                            return CrmTableColumn<List<Object?>>(
+                              id: rawIndex == null
+                                  ? 'summary_${entry.key}'
+                                  : 'report_$rawIndex',
+                              label: entry.value,
+                              value: (row) => entry.key < row.length
+                                  ? row[entry.key]?.toString() ?? ''
+                                  : '',
+                              sortValue: rawIndex == null
+                                  ? null
+                                  : (row) => entry.key < row.length
+                                        ? row[entry.key]
+                                        : null,
+                              filterable: rawIndex != null,
+                              numeric:
+                                  rawIndex != null &&
+                                  widget.numericColumns.contains(rawIndex),
+                              initialWidth: rawIndex == null
+                                  ? 150
+                                  : (_widths[rawIndex] ?? 150),
+                            );
+                          }).toList();
+                          return Scrollbar(
+                            thumbVisibility: true,
+                            child: SingleChildScrollView(
+                              child: CrmTableScroll(
+                                child: CrmDataGridSurface<List<Object?>>(
+                                  columns: columns,
+                                  rows: prepared.rows,
+                                  showRowNumbers: false,
+                                  sortColumnId: detailed && _sortColumn != null
+                                      ? 'report_$_sortColumn'
+                                      : null,
+                                  sortAscending: _sortAscending,
+                                  onSort: detailed
+                                      ? (columnId, ascending) {
+                                          final rawIndex = int.tryParse(
+                                            columnId.replaceFirst(
+                                              'report_',
+                                              '',
                                             ),
-                                          ),
-                                        );
-                                      }).toList(),
-                                    ),
-                                  )
-                                  .toList(),
+                                          );
+                                          if (rawIndex == null) return;
+                                          setState(() {
+                                            _sortColumn = rawIndex;
+                                            _sortAscending = ascending;
+                                            _sorts = [
+                                              _ReportSort(rawIndex, ascending),
+                                            ];
+                                          });
+                                        }
+                                      : null,
+                                ),
+                              ),
                             ),
-                          ),
-                        ),
+                          );
+                        },
                       ),
               ),
             ),

@@ -19,12 +19,14 @@ class OpportunitiesPage extends StatefulWidget {
 
 class _OpportunitiesPageState extends State<OpportunitiesPage> {
   final _search = TextEditingController();
+  final _gridController = CrmDataGridController();
   String? _tradeFilter;
   String? _productFilter;
   String? _provinceFilter;
   String? _cityFilter;
   bool _showActive = true;
   bool _showRealized = false;
+  List<CrmOpportunity> _selectedOpportunities = const [];
 
   @override
   void dispose() {
@@ -90,8 +92,9 @@ class _OpportunitiesPageState extends State<OpportunitiesPage> {
     final needle = _search.text.trim().toLowerCase();
     return widget.store.opportunities.where((item) {
       final realized = item.stage == 'برنده شده';
+      final active = !{'برنده شده', 'از دست رفته'}.contains(item.stage);
       final matchesVisibility =
-          (_showActive && !realized) || (_showRealized && realized);
+          (_showActive && active) || (_showRealized && realized);
       return matchesVisibility &&
           (needle.isEmpty ||
               item.title.toLowerCase().contains(needle) ||
@@ -111,6 +114,7 @@ class _OpportunitiesPageState extends State<OpportunitiesPage> {
     final opportunities = _filteredOpportunities();
     return CrmReportService.printTable(
       context: context,
+      store: widget.store,
       title: 'گزارش فرصت‌های خرید و فروش',
       subtitle:
           'قابل تنظیم بر اساس بازه تاریخ، مشتری، کالا و خدمات، شهر، استان و سطح کل/معین/تفصیلی',
@@ -151,6 +155,7 @@ class _OpportunitiesPageState extends State<OpportunitiesPage> {
   Future<void> _viewOpportunity(CrmOpportunity item) {
     return CrmReportService.printTable(
       context: context,
+      store: widget.store,
       title: 'مشاهده فرصت ${item.title}',
       subtitle: 'پیش‌نمایش کامل فرصت پیش از چاپ',
       headers: const [
@@ -194,13 +199,19 @@ class _OpportunitiesPageState extends State<OpportunitiesPage> {
     ).then((_) {});
   }
 
-  Future<void> _newDocument(CrmOpportunity item, DocumentPageMode mode) async {
+  Future<void> _newDocument(
+    CrmOpportunity item,
+    DocumentPageMode mode, {
+    bool issueInvoice = false,
+  }) async {
     await showDialog<bool>(
       context: context,
       builder: (context) => DocumentEditorDialog(
         store: widget.store,
         mode: mode,
         initialCustomerId: item.customerId,
+        initialDirection: item.tradeType,
+        initialStatus: issueInvoice ? 'فاکتور صادر شد' : null,
       ),
     );
   }
@@ -267,10 +278,19 @@ class _OpportunitiesPageState extends State<OpportunitiesPage> {
         const SizedBox(height: 12),
         CrmPageToolbar(
           onNew: _openEditor,
+          onEdit: _selectedOpportunities.length == 1
+              ? () => _openEditor(_selectedOpportunities.single)
+              : null,
+          onDelete: _selectedOpportunities.length == 1
+              ? () => _delete(_selectedOpportunities.single)
+              : null,
+          onView: _selectedOpportunities.length == 1
+              ? () => _viewOpportunity(_selectedOpportunities.single)
+              : null,
           onReport: _printReport,
           onRefresh: widget.store.refresh,
-          onSearch: () => setState(() {}),
-          onAdvancedFilter: () => setState(() {}),
+          onSearch: _gridController.showSearch,
+          onAdvancedFilter: _gridController.showAdvancedFilter,
         ),
         const SizedBox(height: 18),
         Wrap(
@@ -400,15 +420,27 @@ class _OpportunitiesPageState extends State<OpportunitiesPage> {
                 values: cities,
                 onChanged: (value) => setState(() => _cityFilter = value),
               ),
-              FilterChip(
-                selected: _showActive,
-                label: const Text('فرصت‌های فعال'),
-                onSelected: (value) => setState(() => _showActive = value),
+              SizedBox(
+                width: 190,
+                child: CheckboxListTile(
+                  dense: true,
+                  contentPadding: EdgeInsets.zero,
+                  value: _showActive,
+                  title: const Text('فرصت‌های فعال'),
+                  onChanged: (value) =>
+                      setState(() => _showActive = value ?? false),
+                ),
               ),
-              FilterChip(
-                selected: _showRealized,
-                label: const Text('اهداف تحقق‌یافته'),
-                onSelected: (value) => setState(() => _showRealized = value),
+              SizedBox(
+                width: 210,
+                child: CheckboxListTile(
+                  dense: true,
+                  contentPadding: EdgeInsets.zero,
+                  value: _showRealized,
+                  title: const Text('اهداف تحقق‌یافته'),
+                  onChanged: (value) =>
+                      setState(() => _showRealized = value ?? false),
+                ),
               ),
             ],
           ),
@@ -419,7 +451,9 @@ class _OpportunitiesPageState extends State<OpportunitiesPage> {
               ? 'همه فرصت‌های ثبت‌شده'
               : _showRealized
               ? 'فرصت‌های تحقق‌یافته (لیست اهداف)'
-              : 'فرصت‌های فعال',
+              : _showActive
+              ? 'فرصت‌های فعال'
+              : 'هیچ گروهی برای نمایش انتخاب نشده است',
           trailing: Text('${formatPersianInteger(rows.length)} مورد'),
           child: rows.isEmpty
               ? const EmptyState(
@@ -430,6 +464,10 @@ class _OpportunitiesPageState extends State<OpportunitiesPage> {
               : CrmConfigurableDataTable<CrmOpportunity>(
                   tableId: 'opportunities',
                   rows: rows,
+                  controller: _gridController,
+                  rowKey: (item) => item.id,
+                  onSelectionChanged: (items) =>
+                      setState(() => _selectedOpportunities = items),
                   initialSortColumnId: 'target_date',
                   columns: [
                     CrmTableColumn(
@@ -524,8 +562,15 @@ class _OpportunitiesPageState extends State<OpportunitiesPage> {
                               if (value == 'quote') {
                                 _newDocument(item, DocumentPageMode.quote);
                               }
-                              if (value == 'order' || value == 'invoice') {
+                              if (value == 'order') {
                                 _newDocument(item, DocumentPageMode.order);
+                              }
+                              if (value == 'invoice') {
+                                _newDocument(
+                                  item,
+                                  DocumentPageMode.order,
+                                  issueInvoice: true,
+                                );
                               }
                               if (value == 'attachments') {
                                 showCrmAttachmentManager(

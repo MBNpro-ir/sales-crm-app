@@ -17,6 +17,8 @@ class CalendarPage extends StatefulWidget {
 
 class _CalendarPageState extends State<CalendarPage> {
   Jalali _visibleMonth = Jalali.now();
+  String _eventSearch = '';
+  String? _eventTypeFilter;
 
   List<_CalendarEvent> get _events => <_CalendarEvent>[
     ...widget.store.tasks
@@ -47,6 +49,80 @@ class _CalendarPageState extends State<CalendarPage> {
           ),
         ),
   ]..sort((a, b) => a.date.compareTo(b.date));
+
+  List<_CalendarEvent> get _filteredEvents {
+    final needle = _eventSearch.trim().toLowerCase();
+    return _events.where((event) {
+      final matchesSearch =
+          needle.isEmpty ||
+          event.title.toLowerCase().contains(needle) ||
+          event.subtitle.toLowerCase().contains(needle);
+      final matchesType =
+          _eventTypeFilter == null ||
+          (_eventTypeFilter == 'task' && event.task != null) ||
+          (_eventTypeFilter == 'call' && event.task == null);
+      return matchesSearch && matchesType;
+    }).toList();
+  }
+
+  Future<void> _openEventSearch() async {
+    final controller = TextEditingController(text: _eventSearch);
+    final value = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('جستجوی تقویم'),
+        content: SizedBox(
+          width: 460,
+          child: TextField(
+            controller: controller,
+            autofocus: true,
+            decoration: const InputDecoration(
+              prefixIcon: Icon(Icons.search_rounded),
+              labelText: 'عنوان، مشتری یا شرح',
+            ),
+            onSubmitted: (value) => Navigator.of(context).pop(value),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(''),
+            child: const Text('پاک‌کردن'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(controller.text),
+            child: const Text('اعمال'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (value != null && mounted) setState(() => _eventSearch = value);
+  }
+
+  Future<void> _openEventTypeFilter() async {
+    final value = await showDialog<String?>(
+      context: context,
+      builder: (context) => SimpleDialog(
+        title: const Text('فیلتر پیشرفته تقویم'),
+        children: [
+          SimpleDialogOption(
+            onPressed: () => Navigator.of(context).pop('all'),
+            child: const Text('همه رویدادها'),
+          ),
+          SimpleDialogOption(
+            onPressed: () => Navigator.of(context).pop('task'),
+            child: const Text('وظایف و جلسه‌ها'),
+          ),
+          SimpleDialogOption(
+            onPressed: () => Navigator.of(context).pop('call'),
+            child: const Text('پیگیری تماس‌ها'),
+          ),
+        ],
+      ),
+    );
+    if (!mounted || value == null) return;
+    setState(() => _eventTypeFilter = value == 'all' ? null : value);
+  }
 
   Future<void> _openEditor({CrmTask? task, DateTime? initialDate}) async {
     if (widget.store.customers.isEmpty) {
@@ -135,27 +211,32 @@ class _CalendarPageState extends State<CalendarPage> {
     );
   }
 
-  Future<void> _printReport() => CrmReportService.printTable(
-    context: context,
-    title: 'گزارش تقویم خرید و فروش',
-    headers: const ['تاریخ', 'عنوان', 'مشتری / شرح', 'نوع'],
-    rows: _events
-        .map(
-          (event) => <Object?>[
-            compactDate(event.date),
-            event.title,
-            event.subtitle,
-            event.task?.taskType ?? 'پیگیری تماس',
-          ],
-        )
-        .toList(),
-    rowDates: _events.map((event) => event.date).toList(),
-  );
+  Future<void> _printReport() {
+    final events = _filteredEvents;
+    return CrmReportService.printTable(
+      context: context,
+      store: widget.store,
+      title: 'گزارش تقویم خرید و فروش',
+      headers: const ['تاریخ', 'عنوان', 'مشتری / شرح', 'نوع'],
+      rows: events
+          .map(
+            (event) => <Object?>[
+              compactDate(event.date),
+              event.title,
+              event.subtitle,
+              event.task?.taskType ?? 'پیگیری تماس',
+            ],
+          )
+          .toList(),
+      rowDates: events.map((event) => event.date).toList(),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
     final today = DateTime.now();
-    final upcoming = _events
+    final events = _filteredEvents;
+    final upcoming = events
         .where(
           (event) => !event.date.isBefore(
             DateTime(today.year, today.month, today.day),
@@ -187,13 +268,13 @@ class _CalendarPageState extends State<CalendarPage> {
           onNew: () => _openEditor(initialDate: DateTime.now()),
           onReport: _printReport,
           onRefresh: widget.store.refresh,
-          onSearch: () => setState(() {}),
-          onAdvancedFilter: () => setState(() {}),
+          onSearch: _openEventSearch,
+          onAdvancedFilter: _openEventTypeFilter,
         ),
         const SizedBox(height: 18),
         _MonthCalendar(
           month: _visibleMonth,
-          events: _events,
+          events: events,
           onPrevious: () => setState(() {
             _visibleMonth = _visibleMonth.addMonths(-1);
           }),

@@ -4,6 +4,10 @@ import '../../core/crm_store.dart';
 import '../../core/models.dart';
 import '../../core/report_service.dart';
 import '../widgets/common.dart';
+import '../widgets/entity_tools.dart';
+import 'calls_page.dart';
+import 'customers_page.dart';
+import 'documents_page.dart';
 
 class MarketPage extends StatefulWidget {
   const MarketPage({super.key, required this.store});
@@ -16,9 +20,86 @@ class MarketPage extends StatefulWidget {
 
 class _MarketPageState extends State<MarketPage> {
   String? _selectedProvince;
+  final _gridController = CrmDataGridController();
+  List<CrmCustomer> _selectedCustomers = const [];
+
+  Future<void> _openEditor([CrmCustomer? customer]) async {
+    await showCrmCustomerEditor(
+      context,
+      store: widget.store,
+      customer: customer,
+    );
+  }
+
+  Future<void> _delete(CrmCustomer customer) async {
+    if (!await confirmDelete(context, label: customer.displayName)) return;
+    await widget.store.deleteCustomer(customer);
+  }
+
+  Future<void> _view(CrmCustomer customer) => CrmReportService.printTable(
+    context: context,
+    store: widget.store,
+    title: 'مشاهده مشتری ${customer.displayName}',
+    headers: const [
+      'نام',
+      'شرکت',
+      'موبایل',
+      'تلفن',
+      'استان',
+      'شهر',
+      'نوع فعالیت',
+      'وضعیت',
+      'اولویت',
+      'منبع جذب',
+      'کالای مورد علاقه',
+      'یادداشت',
+    ],
+    rows: [
+      [
+        customer.name,
+        customer.company,
+        customer.mobile,
+        customer.phone,
+        customer.province,
+        customer.city,
+        customer.activityType,
+        customer.status,
+        customer.priority,
+        customer.details['source'] ?? '',
+        customer.details['interested_products'] ?? '',
+        customer.notes,
+      ],
+    ],
+    rowDates: [customer.updatedAt],
+  );
+
+  Future<void> _newCall(CrmCustomer customer) async {
+    await showCrmCallEditor(
+      context,
+      store: widget.store,
+      initialCustomerId: customer.id,
+    );
+  }
+
+  Future<void> _newDocument(
+    CrmCustomer customer,
+    DocumentPageMode mode, {
+    bool issueInvoice = false,
+  }) async {
+    await showDialog<bool>(
+      context: context,
+      builder: (context) => DocumentEditorDialog(
+        store: widget.store,
+        mode: mode,
+        initialCustomerId: customer.id,
+        initialStatus: issueInvoice ? 'فاکتور صادر شد' : null,
+      ),
+    );
+  }
 
   Future<void> _printMarket() => CrmReportService.printTable(
     context: context,
+    store: widget.store,
     title: 'گزارش نقشه بازار و جذب مشتری',
     subtitle: 'قابل فیلتر بر اساس استان، شهر، وضعیت، اولویت و منبع جذب',
     headers: const [
@@ -43,6 +124,7 @@ class _MarketPageState extends State<MarketPage> {
           ],
         )
         .toList(),
+    rowDates: widget.store.customers.map((item) => item.updatedAt).toList(),
   );
 
   @override
@@ -76,10 +158,20 @@ class _MarketPageState extends State<MarketPage> {
         ),
         const SizedBox(height: 12),
         CrmPageToolbar(
+          onNew: () => _openEditor(),
+          onEdit: _selectedCustomers.length == 1
+              ? () => _openEditor(_selectedCustomers.single)
+              : null,
+          onDelete: _selectedCustomers.length == 1
+              ? () => _delete(_selectedCustomers.single)
+              : null,
+          onView: _selectedCustomers.length == 1
+              ? () => _view(_selectedCustomers.single)
+              : null,
           onReport: _printMarket,
           onRefresh: widget.store.refresh,
-          onSearch: () => setState(() {}),
-          onAdvancedFilter: () => setState(() {}),
+          onSearch: _gridController.showSearch,
+          onAdvancedFilter: _gridController.showAdvancedFilter,
         ),
         const SizedBox(height: 18),
         Wrap(
@@ -229,6 +321,10 @@ class _MarketPageState extends State<MarketPage> {
               : CrmConfigurableDataTable<CrmCustomer>(
                   tableId: 'market_potential_customers',
                   rows: potentialCustomers,
+                  controller: _gridController,
+                  rowKey: (item) => item.id,
+                  onSelectionChanged: (items) =>
+                      setState(() => _selectedCustomers = items),
                   initialSortColumnId: 'priority',
                   columns: [
                     CrmTableColumn(
@@ -264,6 +360,85 @@ class _MarketPageState extends State<MarketPage> {
                       label: 'کالای مورد علاقه',
                       value: (customer) =>
                           customer.details['interested_products'] ?? '—',
+                    ),
+                    CrmTableColumn(
+                      id: 'actions',
+                      label: 'عملیات',
+                      value: (_) => '',
+                      canHide: false,
+                      filterable: false,
+                      cell: (context, customer) => PopupMenuButton<String>(
+                        tooltip: 'عملیات مشتری',
+                        onSelected: (value) {
+                          if (value == 'view' || value == 'print') {
+                            _view(customer);
+                          }
+                          if (value == 'edit' || value == 'note') {
+                            _openEditor(customer);
+                          }
+                          if (value == 'call') _newCall(customer);
+                          if (value == 'quote') {
+                            _newDocument(customer, DocumentPageMode.quote);
+                          }
+                          if (value == 'order') {
+                            _newDocument(customer, DocumentPageMode.order);
+                          }
+                          if (value == 'invoice') {
+                            _newDocument(
+                              customer,
+                              DocumentPageMode.order,
+                              issueInvoice: true,
+                            );
+                          }
+                          if (value == 'attachments') {
+                            showCrmAttachmentManager(
+                              context,
+                              store: widget.store,
+                              entityType: 'customer',
+                              entityId: customer.id,
+                              title: customer.displayName,
+                            );
+                          }
+                          if (value == 'history') {
+                            showCrmAuditLog(
+                              context,
+                              store: widget.store,
+                              entityType: 'customer',
+                              entityId: customer.id,
+                              title: customer.displayName,
+                            );
+                          }
+                          if (value == 'delete') _delete(customer);
+                        },
+                        itemBuilder: (context) => const [
+                          PopupMenuItem(value: 'view', child: Text('مشاهده')),
+                          PopupMenuItem(value: 'edit', child: Text('ویرایش')),
+                          PopupMenuItem(value: 'delete', child: Text('حذف')),
+                          PopupMenuItem(value: 'call', child: Text('ثبت تماس')),
+                          PopupMenuItem(
+                            value: 'quote',
+                            child: Text('پیش‌فاکتور'),
+                          ),
+                          PopupMenuItem(value: 'order', child: Text('سفارش')),
+                          PopupMenuItem(
+                            value: 'invoice',
+                            child: Text('فاکتور'),
+                          ),
+                          PopupMenuItem(value: 'note', child: Text('یادداشت')),
+                          PopupMenuItem(
+                            value: 'print',
+                            child: Text('گزارش و چاپ'),
+                          ),
+                          PopupMenuItem(
+                            value: 'attachments',
+                            child: Text('فایل‌های پیوست'),
+                          ),
+                          PopupMenuItem(
+                            value: 'history',
+                            child: Text('تاریخچه'),
+                          ),
+                        ],
+                      ),
                     ),
                   ],
                 ),

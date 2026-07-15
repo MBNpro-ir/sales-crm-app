@@ -8,6 +8,18 @@ import '../widgets/entity_tools.dart';
 import 'calls_page.dart';
 import 'documents_page.dart';
 
+Future<bool?> showCrmCustomerEditor(
+  BuildContext context, {
+  required CrmStore store,
+  CrmCustomer? customer,
+}) {
+  return showDialog<bool>(
+    context: context,
+    builder: (context) =>
+        _CustomerEditorDialog(store: store, customer: customer),
+  );
+}
+
 class CustomersPage extends StatefulWidget {
   const CustomersPage({super.key, required this.store, this.onOpenProducts});
 
@@ -24,11 +36,13 @@ class _CustomersPageState extends State<CustomersPage> {
   final _nameFilter = TextEditingController();
   final _mobileFilter = TextEditingController();
   final _cityFilter = TextEditingController();
+  final _gridController = CrmDataGridController();
   String? _activityFilter;
   String? _statusFilter;
   String? _priorityFilter;
   String? _provinceFilter;
   String? _quickFilter;
+  List<CrmCustomer> _selectedCustomers = const [];
 
   @override
   void dispose() {
@@ -41,10 +55,10 @@ class _CustomersPageState extends State<CustomersPage> {
   }
 
   Future<void> _openEditor([CrmCustomer? customer]) async {
-    final saved = await showDialog<bool>(
-      context: context,
-      builder: (context) =>
-          _CustomerEditorDialog(store: widget.store, customer: customer),
+    final saved = await showCrmCustomerEditor(
+      context,
+      store: widget.store,
+      customer: customer,
     );
     if (!mounted || saved != true) return;
     showCrmNotice(
@@ -107,6 +121,20 @@ class _CustomersPageState extends State<CustomersPage> {
     final opportunities = widget.store.opportunities
         .where((item) => item.customerId == customer.id)
         .toList();
+    final orders = widget.store.orders
+        .where((item) => item.customerId == customer.id)
+        .toList();
+    final creationAudits = widget.store
+        .auditFor('customer', customer.id)
+        .where(
+          (item) => item.action == 'ایجاد' || item.action == 'ورود از اکسل',
+        )
+        .toList();
+    final createdAt = creationAudits.isEmpty
+        ? customer.updatedAt
+        : creationAudits
+              .map((item) => item.updatedAt)
+              .reduce((left, right) => left.isBefore(right) ? left : right);
     final lastCall = calls.isEmpty
         ? null
         : calls
@@ -116,14 +144,17 @@ class _CustomersPageState extends State<CustomersPage> {
         ? 1 << 20
         : DateTime.now().difference(lastCall).inDays;
     return switch (filter) {
-      'مشتری جدید' =>
-        DateTime.now().difference(customer.updatedAt).inDays <= 30,
+      'مشتری جدید' => DateTime.now().difference(createdAt).inDays <= 30,
       'مشتری VIP' => customer.isVip,
       'بدون تماس ۱۵ تا ۲۰ روز' =>
         daysWithoutCall >= 15 && daysWithoutCall <= 20,
       'بدون تماس ۲۰ تا ۳۰ روز' => daysWithoutCall > 20 && daysWithoutCall <= 30,
-      'بدون خرید' => !calls.any((item) => item.tradeType == 'خرید'),
-      'بدون فروش' => !calls.any((item) => item.tradeType == 'فروش'),
+      'بدون خرید' =>
+        !calls.any((item) => item.tradeType == 'خرید') &&
+            !orders.any((item) => item.direction == 'خرید'),
+      'بدون فروش' =>
+        !calls.any((item) => item.tradeType == 'فروش') &&
+            !orders.any((item) => item.direction == 'فروش'),
       'فرصت فعال' => opportunities.any(
         (item) => !{'برنده شده', 'از دست رفته'}.contains(item.stage),
       ),
@@ -161,7 +192,17 @@ class _CustomersPageState extends State<CustomersPage> {
           item.priority,
           item.isVip ? 'بله' : 'خیر',
           item.details['email'] ?? '',
+          item.details['secondary_mobile'] ?? '',
+          item.details['national_id'] ?? '',
+          item.details['district'] ?? '',
           item.details['address'] ?? '',
+          item.details['postal_code'] ?? '',
+          item.details['source'] ?? '',
+          item.details['interested_products'] ?? '',
+          item.details['monthly_volume'] ?? '',
+          item.details['payment_terms'] ?? '',
+          item.details['fax'] ?? '',
+          item.details['website'] ?? '',
           item.tags.join(', '),
           item.notes,
         ],
@@ -181,7 +222,17 @@ class _CustomersPageState extends State<CustomersPage> {
     'اولویت',
     'VIP',
     'ایمیل',
+    'تلفن همراه دوم',
+    'کد ملی / شناسه ملی',
+    'منطقه',
     'آدرس',
+    'کد پستی',
+    'منبع آشنایی',
+    'کالاهای مورد علاقه',
+    'حجم خرید ماهانه',
+    'شرایط پرداخت',
+    'فکس',
+    'وب‌سایت',
     'برچسب‌ها',
     'یادداشت',
   ];
@@ -222,7 +273,19 @@ class _CustomersPageState extends State<CustomersPage> {
       'VIP': 'is_vip',
       'وی آی پی': 'is_vip',
       'ایمیل': 'email',
+      'تلفن همراه دوم': 'secondary_mobile',
+      'موبایل دوم': 'secondary_mobile',
+      'کد ملی / شناسه ملی': 'national_id',
+      'شناسه ملی': 'national_id',
+      'منطقه': 'district',
       'آدرس': 'address',
+      'کد پستی': 'postal_code',
+      'منبع آشنایی': 'source',
+      'کالاهای مورد علاقه': 'interested_products',
+      'حجم خرید ماهانه': 'monthly_volume',
+      'شرایط پرداخت': 'payment_terms',
+      'فکس': 'fax',
+      'وب‌سایت': 'website',
       'برچسب‌ها': 'tags',
       'یادداشت': 'notes',
     };
@@ -247,14 +310,18 @@ class _CustomersPageState extends State<CustomersPage> {
     }
   }
 
-  Future<void> _openPhonebook([List<CrmCustomer>? source]) =>
-      CrmReportService.printTable(
-        context: context,
-        title: 'دفترچه تلفن مشتریان',
-        subtitle: 'نمایش کامل، فیلتر، مرتب‌سازی و شخصی‌سازی دفتر تلفن',
-        headers: _exportHeaders,
-        rows: _rowsForExport(source ?? _filteredCustomers()),
-      );
+  Future<void> _openPhonebook([List<CrmCustomer>? source]) {
+    final customers = source ?? _filteredCustomers();
+    return CrmReportService.printTable(
+      context: context,
+      store: widget.store,
+      title: 'دفترچه تلفن مشتریان',
+      subtitle: 'نمایش کامل، فیلتر، مرتب‌سازی و شخصی‌سازی دفتر تلفن',
+      headers: _exportHeaders,
+      rows: _rowsForExport(customers),
+      rowDates: customers.map((item) => item.updatedAt).toList(),
+    );
+  }
 
   Future<void> _newCall(CrmCustomer customer) async {
     await showCrmCallEditor(
@@ -283,19 +350,23 @@ class _CustomersPageState extends State<CustomersPage> {
     }
   }
 
-  Future<void> _newOrder(CrmCustomer customer) async {
+  Future<void> _newOrder(
+    CrmCustomer customer, {
+    bool issueInvoice = false,
+  }) async {
     final saved = await showDialog<bool>(
       context: context,
       builder: (context) => DocumentEditorDialog(
         store: widget.store,
         mode: DocumentPageMode.order,
         initialCustomerId: customer.id,
+        initialStatus: issueInvoice ? 'فاکتور صادر شد' : null,
       ),
     );
     if (mounted && saved == true) {
       showCrmNotice(
         context,
-        'سفارش مشتری ثبت شد.',
+        issueInvoice ? 'فاکتور مشتری صادر شد.' : 'سفارش مشتری ثبت شد.',
         type: CrmNoticeType.success,
       );
     }
@@ -388,6 +459,66 @@ class _CustomersPageState extends State<CustomersPage> {
     );
   }
 
+  Future<void> _showToolsDialog() async {
+    final action = await showDialog<String>(
+      context: context,
+      builder: (context) => SimpleDialog(
+        title: const Text('ابزار / امکانات'),
+        children: [
+          SimpleDialogOption(
+            onPressed: () => Navigator.pop(context, 'import'),
+            child: const ListTile(
+              leading: Icon(Icons.file_upload_outlined),
+              title: Text('ورود اطلاعات از اکسل'),
+            ),
+          ),
+          SimpleDialogOption(
+            onPressed: () => Navigator.pop(context, 'export'),
+            child: const ListTile(
+              leading: Icon(Icons.file_download_outlined),
+              title: Text('خروجی اطلاعات به اکسل'),
+            ),
+          ),
+          SimpleDialogOption(
+            onPressed: () => Navigator.pop(context, 'phonebook'),
+            child: const ListTile(
+              leading: Icon(Icons.contact_phone_outlined),
+              title: Text('دفتر تلفن'),
+            ),
+          ),
+          SimpleDialogOption(
+            onPressed: () => Navigator.pop(context, 'backup'),
+            child: const ListTile(
+              leading: Icon(Icons.backup_outlined),
+              title: Text('تهیه پشتیبان'),
+            ),
+          ),
+          SimpleDialogOption(
+            onPressed: () => Navigator.pop(context, 'restore'),
+            child: const ListTile(
+              leading: Icon(Icons.restore_rounded),
+              title: Text('بازیابی پشتیبان'),
+            ),
+          ),
+          SimpleDialogOption(
+            onPressed: () => Navigator.pop(context, 'sync'),
+            child: const ListTile(
+              leading: Icon(Icons.sync_rounded),
+              title: Text('همگام‌سازی'),
+            ),
+          ),
+        ],
+      ),
+    );
+    if (!mounted || action == null) return;
+    if (action == 'import') await _importExcel();
+    if (action == 'export') await _exportExcel();
+    if (action == 'phonebook') await _openPhonebook();
+    if (action == 'backup') await _backupTools('create');
+    if (action == 'restore') await _backupTools('restore');
+    if (action == 'sync') await _sync();
+  }
+
   @override
   Widget build(BuildContext context) {
     final rows = _filteredCustomers();
@@ -440,13 +571,22 @@ class _CustomersPageState extends State<CustomersPage> {
         const SizedBox(height: 12),
         CrmPageToolbar(
           onNew: _openEditor,
+          onEdit: _selectedCustomers.length == 1
+              ? () => _openEditor(_selectedCustomers.single)
+              : null,
+          onDelete: _selectedCustomers.length == 1
+              ? () => _delete(_selectedCustomers.single)
+              : null,
+          onView: _selectedCustomers.length == 1
+              ? () => _showDetails(_selectedCustomers.single)
+              : null,
           onReport: _openPhonebook,
           onExportExcel: _exportExcel,
           onImportExcel: _importExcel,
-          onTools: _backupTools,
+          onTools: _showToolsDialog,
           onRefresh: widget.store.refresh,
-          onSearch: () => setState(() {}),
-          onAdvancedFilter: () => setState(() {}),
+          onSearch: _gridController.showSearch,
+          onAdvancedFilter: _gridController.showAdvancedFilter,
         ),
         const SizedBox(height: 18),
         SectionCard(
@@ -533,6 +673,10 @@ class _CustomersPageState extends State<CustomersPage> {
             child: CrmConfigurableDataTable<CrmCustomer>(
               tableId: 'customers',
               rows: rows,
+              controller: _gridController,
+              rowKey: (item) => item.id,
+              onSelectionChanged: (items) =>
+                  setState(() => _selectedCustomers = items),
               initialSortColumnId: 'code',
               columns: [
                 CrmTableColumn(
@@ -567,6 +711,18 @@ class _CustomersPageState extends State<CustomersPage> {
                   initiallyVisible: false,
                 ),
                 CrmTableColumn(
+                  id: 'secondary_mobile',
+                  label: 'تلفن همراه دوم',
+                  value: (item) => item.details['secondary_mobile'] ?? '',
+                  initiallyVisible: false,
+                ),
+                CrmTableColumn(
+                  id: 'national_id',
+                  label: 'کد ملی / شناسه ملی',
+                  value: (item) => item.details['national_id'] ?? '',
+                  initiallyVisible: false,
+                ),
+                CrmTableColumn(
                   id: 'province',
                   label: 'استان',
                   value: (item) => item.province,
@@ -575,6 +731,12 @@ class _CustomersPageState extends State<CustomersPage> {
                   id: 'city',
                   label: 'شهر',
                   value: (item) => item.city,
+                ),
+                CrmTableColumn(
+                  id: 'district',
+                  label: 'منطقه',
+                  value: (item) => item.details['district'] ?? '',
+                  initiallyVisible: false,
                 ),
                 CrmTableColumn(
                   id: 'activity',
@@ -614,6 +776,48 @@ class _CustomersPageState extends State<CustomersPage> {
                   initiallyVisible: false,
                 ),
                 CrmTableColumn(
+                  id: 'postal_code',
+                  label: 'کد پستی',
+                  value: (item) => item.details['postal_code'] ?? '',
+                  initiallyVisible: false,
+                ),
+                CrmTableColumn(
+                  id: 'source',
+                  label: 'منبع آشنایی',
+                  value: (item) => item.details['source'] ?? '',
+                  initiallyVisible: false,
+                ),
+                CrmTableColumn(
+                  id: 'interested_products',
+                  label: 'کالاهای مورد علاقه',
+                  value: (item) => item.details['interested_products'] ?? '',
+                  initiallyVisible: false,
+                ),
+                CrmTableColumn(
+                  id: 'monthly_volume',
+                  label: 'حجم خرید ماهانه',
+                  value: (item) => item.details['monthly_volume'] ?? '',
+                  initiallyVisible: false,
+                ),
+                CrmTableColumn(
+                  id: 'payment_terms',
+                  label: 'شرایط پرداخت',
+                  value: (item) => item.details['payment_terms'] ?? '',
+                  initiallyVisible: false,
+                ),
+                CrmTableColumn(
+                  id: 'fax',
+                  label: 'فکس',
+                  value: (item) => item.details['fax'] ?? '',
+                  initiallyVisible: false,
+                ),
+                CrmTableColumn(
+                  id: 'website',
+                  label: 'وب‌سایت',
+                  value: (item) => item.details['website'] ?? '',
+                  initiallyVisible: false,
+                ),
+                CrmTableColumn(
                   id: 'notes',
                   label: 'یادداشت',
                   value: (item) => item.notes,
@@ -634,6 +838,9 @@ class _CustomersPageState extends State<CustomersPage> {
                       if (value == 'call') _newCall(customer);
                       if (value == 'quote') _newQuote(customer);
                       if (value == 'order') _newOrder(customer);
+                      if (value == 'invoice') {
+                        _newOrder(customer, issueInvoice: true);
+                      }
                       if (value == 'print') _openPhonebook([customer]);
                       if (value == 'attachments') {
                         showCrmAttachmentManager(
@@ -665,6 +872,7 @@ class _CustomersPageState extends State<CustomersPage> {
                       ),
                       PopupMenuItem(value: 'quote', child: Text('پیش‌فاکتور')),
                       PopupMenuItem(value: 'order', child: Text('سفارش')),
+                      PopupMenuItem(value: 'invoice', child: Text('فاکتور')),
                       PopupMenuItem(value: 'print', child: Text('گزارش و چاپ')),
                       PopupMenuItem(
                         value: 'attachments',
@@ -749,6 +957,29 @@ class _CustomerDetailsDialog extends StatefulWidget {
 class _CustomerDetailsDialogState extends State<_CustomerDetailsDialog> {
   List<_CustomerTimelineEvent> get _events {
     final customer = widget.customer;
+    final customerCalls = widget.store.calls
+        .where((item) => item.customerId == customer.id)
+        .toList();
+    final customerOpportunities = widget.store.opportunities
+        .where((item) => item.customerId == customer.id)
+        .toList();
+    final customerQuotes = widget.store.quotes
+        .where((item) => item.customerId == customer.id)
+        .toList();
+    final customerOrders = widget.store.orders
+        .where((item) => item.customerId == customer.id)
+        .toList();
+    final linkedEntityIds = <String, Set<String>>{
+      'customer': {customer.id},
+      'call': customerCalls.map((item) => item.id).toSet(),
+      'opportunity': customerOpportunities.map((item) => item.id).toSet(),
+      'quote': customerQuotes.map((item) => item.id).toSet(),
+      'order': customerOrders.map((item) => item.id).toSet(),
+      'invoice': {
+        ...customerQuotes.map((item) => item.id),
+        ...customerOrders.map((item) => item.id),
+      },
+    };
     final result = <_CustomerTimelineEvent>[
       if (customer.notes.trim().isNotEmpty)
         _CustomerTimelineEvent(
@@ -758,56 +989,52 @@ class _CustomerDetailsDialogState extends State<_CustomerDetailsDialog> {
           subtitle: customer.notes,
           color: Colors.amber,
         ),
-      ...widget.store.calls
-          .where((item) => item.customerId == customer.id)
-          .map(
-            (item) => _CustomerTimelineEvent(
-              date: item.callAt,
-              icon: item.type == 'جلسه'
-                  ? Icons.groups_outlined
-                  : Icons.phone_in_talk_outlined,
-              title: item.type == 'جلسه' ? 'جلسه' : 'تماس',
-              subtitle: '${item.subject} — ${item.status}',
-              color: Colors.blue,
-            ),
-          ),
-      ...widget.store.opportunities
-          .where((item) => item.customerId == customer.id)
-          .map(
-            (item) => _CustomerTimelineEvent(
-              date: item.updatedAt,
-              icon: Icons.track_changes_outlined,
-              title: 'فرصت ${item.tradeType}',
-              subtitle: '${item.title} — ${item.stage}',
-              color: Colors.purple,
-            ),
-          ),
-      ...widget.store.quotes
-          .where((item) => item.customerId == customer.id)
-          .map(
-            (item) => _CustomerTimelineEvent(
-              date: item.updatedAt,
-              icon: Icons.request_quote_outlined,
-              title: 'پیش‌فاکتور ${item.quoteNumber}',
-              subtitle: '${item.status} — ${compactMoney(item.totalAmount)}',
-              color: Colors.teal,
-            ),
-          ),
-      ...widget.store.orders
-          .where((item) => item.customerId == customer.id)
-          .map(
-            (item) => _CustomerTimelineEvent(
-              date: item.orderAt,
-              icon: item.status.contains('فاکتور')
-                  ? Icons.receipt_long_outlined
-                  : Icons.shopping_cart_outlined,
-              title: item.status.contains('فاکتور')
-                  ? 'فاکتور ${item.orderNumber}'
-                  : 'سفارش ${item.orderNumber}',
-              subtitle: '${item.status} — ${compactMoney(item.totalAmount)}',
-              color: Colors.green,
-            ),
-          ),
+      ...customerCalls.map(
+        (item) => _CustomerTimelineEvent(
+          date: item.callAt,
+          icon: item.type == 'جلسه'
+              ? Icons.groups_outlined
+              : Icons.phone_in_talk_outlined,
+          title: item.type == 'جلسه' ? 'جلسه' : 'تماس',
+          subtitle: '${item.subject} — ${item.status}',
+          color: Colors.blue,
+        ),
+      ),
+      ...customerOpportunities.map(
+        (item) => _CustomerTimelineEvent(
+          date: item.updatedAt,
+          icon: Icons.track_changes_outlined,
+          title: 'فرصت ${item.tradeType}',
+          subtitle: '${item.title} — ${item.stage}',
+          color: Colors.purple,
+        ),
+      ),
+      ...customerQuotes.map(
+        (item) => _CustomerTimelineEvent(
+          date: item.updatedAt,
+          icon: item.status.contains('فاکتور')
+              ? Icons.receipt_long_outlined
+              : Icons.request_quote_outlined,
+          title: item.status.contains('فاکتور')
+              ? 'فاکتور ${item.quoteNumber}'
+              : 'پیش‌فاکتور ${item.quoteNumber}',
+          subtitle: '${item.status} — ${compactMoney(item.totalAmount)}',
+          color: item.status.contains('فاکتور') ? Colors.green : Colors.teal,
+        ),
+      ),
+      ...customerOrders.map(
+        (item) => _CustomerTimelineEvent(
+          date: item.orderAt,
+          icon: item.status.contains('فاکتور')
+              ? Icons.receipt_long_outlined
+              : Icons.shopping_cart_outlined,
+          title: item.status.contains('فاکتور')
+              ? 'فاکتور ${item.orderNumber}'
+              : 'سفارش ${item.orderNumber}',
+          subtitle: '${item.status} — ${compactMoney(item.totalAmount)}',
+          color: Colors.green,
+        ),
+      ),
       ...widget.store.tasks
           .where((item) => item.customerId == customer.id)
           .map(
@@ -819,13 +1046,25 @@ class _CustomerDetailsDialogState extends State<_CustomerDetailsDialog> {
               color: Colors.orange,
             ),
           ),
-      ...widget.store
-          .attachmentsFor('customer', customer.id)
+      ...widget.store.attachments
+          .where(
+            (item) =>
+                linkedEntityIds[item.entityType]?.contains(item.entityId) ==
+                true,
+          )
           .map(
             (item) => _CustomerTimelineEvent(
               date: item.updatedAt,
               icon: Icons.attach_file_rounded,
-              title: 'فایل پیوست',
+              title:
+                  'فایل پیوست ${switch (item.entityType) {
+                    'call' => 'تماس',
+                    'opportunity' => 'فرصت',
+                    'quote' => 'پیش‌فاکتور',
+                    'order' => 'سفارش',
+                    'invoice' => 'فاکتور',
+                    _ => 'مشتری',
+                  }}',
               subtitle: item.fileName,
               color: Colors.blueGrey,
             ),
@@ -1030,15 +1269,27 @@ class _CustomerDetailsDialogState extends State<_CustomerDetailsDialog> {
       'نام مخاطب': customer.name,
       'شرکت': customer.company,
       'موبایل': customer.mobile,
+      'تلفن همراه دوم': customer.details['secondary_mobile'] ?? '',
       'تلفن': customer.phone,
+      'فکس': customer.details['fax'] ?? '',
       'ایمیل': customer.details['email'] ?? '',
+      'وب‌سایت': customer.details['website'] ?? '',
+      'کد ملی / شناسه ملی': customer.details['national_id'] ?? '',
       'استان': customer.province,
       'شهر': customer.city,
+      'منطقه': customer.details['district'] ?? '',
       'نوع فعالیت': customer.activityType,
       'وضعیت': customer.status,
       'اولویت': customer.priority,
+      'VIP': customer.isVip ? 'بله' : 'خیر',
       'آدرس': customer.details['address'] ?? '',
+      'کد پستی': customer.details['postal_code'] ?? '',
+      'منبع آشنایی': customer.details['source'] ?? '',
+      'کالاهای مورد علاقه': customer.details['interested_products'] ?? '',
+      'حجم خرید ماهانه': customer.details['monthly_volume'] ?? '',
+      'شرایط پرداخت': customer.details['payment_terms'] ?? '',
       'برچسب‌ها': customer.tags.join('، '),
+      'یادداشت': customer.notes,
     };
     return Wrap(
       spacing: 12,
@@ -1257,7 +1508,7 @@ class _CustomerEditorDialogState extends State<_CustomerEditorDialog> {
                     value: _isVip,
                     title: const Text('مشتری VIP'),
                     subtitle: const Text(
-                      'نمایش در فهرست ویژه و پیگیری‌های اولویت‌دار',
+                      'قابل استفاده در فیلتر آماده و پیگیری‌های اولویت‌دار',
                     ),
                     onChanged: (value) => setState(() => _isVip = value),
                   ),

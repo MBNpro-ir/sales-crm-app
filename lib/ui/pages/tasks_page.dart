@@ -4,6 +4,7 @@ import '../../core/crm_store.dart';
 import '../../core/models.dart';
 import '../../core/report_service.dart';
 import '../widgets/common.dart';
+import '../widgets/entity_tools.dart';
 
 class TasksPage extends StatefulWidget {
   const TasksPage({super.key, required this.store});
@@ -16,11 +17,95 @@ class TasksPage extends StatefulWidget {
 
 class _TasksPageState extends State<TasksPage> {
   final _search = TextEditingController();
+  final _searchFocus = FocusNode();
+  String? _statusFilter;
+  String? _priorityFilter;
 
   @override
   void dispose() {
     _search.dispose();
+    _searchFocus.dispose();
     super.dispose();
+  }
+
+  Future<void> _openAdvancedFilter() async {
+    var status = _statusFilter;
+    var priority = _priorityFilter;
+    final apply = await showDialog<bool>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Text('فیلتر پیشرفته وظایف'),
+          content: SizedBox(
+            width: 480,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                DropdownButtonFormField<String?>(
+                  initialValue: status,
+                  decoration: const InputDecoration(labelText: 'وضعیت'),
+                  items:
+                      <String?>[
+                            null,
+                            ...widget.store.tasks
+                                .map((item) => item.status)
+                                .toSet(),
+                          ]
+                          .map(
+                            (value) => DropdownMenuItem(
+                              value: value,
+                              child: Text(value ?? 'همه وضعیت‌ها'),
+                            ),
+                          )
+                          .toList(),
+                  onChanged: (value) => setDialogState(() => status = value),
+                ),
+                const SizedBox(height: 12),
+                DropdownButtonFormField<String?>(
+                  initialValue: priority,
+                  decoration: const InputDecoration(labelText: 'اولویت'),
+                  items:
+                      <String?>[
+                            null,
+                            ...widget.store.tasks
+                                .map((item) => item.priority)
+                                .toSet(),
+                          ]
+                          .map(
+                            (value) => DropdownMenuItem(
+                              value: value,
+                              child: Text(value ?? 'همه اولویت‌ها'),
+                            ),
+                          )
+                          .toList(),
+                  onChanged: (value) => setDialogState(() => priority = value),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                status = null;
+                priority = null;
+                Navigator.of(context).pop(true);
+              },
+              child: const Text('پاک‌کردن فیلترها'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text('اعمال'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (apply == true && mounted) {
+      setState(() {
+        _statusFilter = status;
+        _priorityFilter = priority;
+      });
+    }
   }
 
   Future<void> _openEditor([CrmTask? task]) async {
@@ -59,6 +144,7 @@ class _TasksPageState extends State<TasksPage> {
 
   Future<void> _printReport() => CrmReportService.printTable(
     context: context,
+    store: widget.store,
     title: 'گزارش پیگیری و وظایف',
     headers: const [
       'عنوان',
@@ -88,15 +174,18 @@ class _TasksPageState extends State<TasksPage> {
   @override
   Widget build(BuildContext context) {
     final needle = _search.text.trim().toLowerCase();
-    final tasks = widget.store.tasks
-        .where(
-          (task) =>
-              needle.isEmpty ||
-              task.title.toLowerCase().contains(needle) ||
-              task.customerName.toLowerCase().contains(needle) ||
-              task.status.contains(needle),
-        )
-        .toList();
+    final tasks = widget.store.tasks.where((task) {
+      final matchesSearch =
+          needle.isEmpty ||
+          task.title.toLowerCase().contains(needle) ||
+          task.customerName.toLowerCase().contains(needle) ||
+          task.status.contains(needle);
+      final matchesStatus =
+          _statusFilter == null || task.status == _statusFilter;
+      final matchesPriority =
+          _priorityFilter == null || task.priority == _priorityFilter;
+      return matchesSearch && matchesStatus && matchesPriority;
+    }).toList();
     final active = tasks.where((task) => !task.isDone).toList()
       ..sort(
         (a, b) =>
@@ -127,8 +216,8 @@ class _TasksPageState extends State<TasksPage> {
           onNew: () => _openEditor(),
           onReport: _printReport,
           onRefresh: widget.store.refresh,
-          onSearch: () => setState(() {}),
-          onAdvancedFilter: () => setState(() {}),
+          onSearch: _searchFocus.requestFocus,
+          onAdvancedFilter: _openAdvancedFilter,
         ),
         const SizedBox(height: 18),
         Wrap(
@@ -201,6 +290,7 @@ class _TasksPageState extends State<TasksPage> {
             controller: _search,
             child: TextField(
               controller: _search,
+              focusNode: _searchFocus,
               onChanged: (_) => setState(() {}),
               decoration: const InputDecoration(
                 prefixIcon: Icon(Icons.search_rounded),
@@ -271,6 +361,35 @@ class _TaskTile extends StatelessWidget {
   final VoidCallback onEdit;
   final VoidCallback onDelete;
   final bool compact;
+
+  Future<void> _view(BuildContext context) => CrmReportService.printTable(
+    context: context,
+    store: store,
+    title: 'نمایش وظیفه ${task.title}',
+    headers: const [
+      'عنوان',
+      'مشتری',
+      'نوع',
+      'اولویت',
+      'وضعیت',
+      'سررسید',
+      'مسئول',
+      'یادداشت',
+    ],
+    rows: [
+      [
+        task.title,
+        task.customerName,
+        task.taskType,
+        task.priority,
+        task.status,
+        task.dueAt == null ? '—' : compactDate(task.dueAt!),
+        task.ownerName,
+        task.notes,
+      ],
+    ],
+    rowDates: [task.dueAt],
+  );
 
   @override
   Widget build(BuildContext context) {
@@ -345,15 +464,47 @@ class _TaskTile extends StatelessWidget {
           PopupMenuButton<String>(
             tooltip: 'عملیات وظیفه',
             onSelected: (value) {
+              if (value == 'view') _view(context);
               if (value == 'edit') onEdit();
+              if (value == 'note') onEdit();
+              if (value == 'history') {
+                showCrmAuditLog(
+                  context,
+                  store: store,
+                  entityType: 'task',
+                  entityId: task.id,
+                  title: task.title,
+                );
+              }
               if (value == 'delete') onDelete();
             },
             itemBuilder: (context) => const [
+              PopupMenuItem(
+                value: 'view',
+                child: ListTile(
+                  leading: Icon(Icons.visibility_outlined),
+                  title: Text('مشاهده'),
+                ),
+              ),
               PopupMenuItem(
                 value: 'edit',
                 child: ListTile(
                   leading: Icon(Icons.edit_outlined),
                   title: Text('ویرایش'),
+                ),
+              ),
+              PopupMenuItem(
+                value: 'note',
+                child: ListTile(
+                  leading: Icon(Icons.note_alt_outlined),
+                  title: Text('یادداشت'),
+                ),
+              ),
+              PopupMenuItem(
+                value: 'history',
+                child: ListTile(
+                  leading: Icon(Icons.history_rounded),
+                  title: Text('تاریخچه'),
                 ),
               ),
               PopupMenuItem(

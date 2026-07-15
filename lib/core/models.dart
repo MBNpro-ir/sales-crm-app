@@ -879,6 +879,73 @@ class CrmAuditEntry {
   }
 }
 
+class CrmReportTemplate {
+  const CrmReportTemplate({
+    required this.id,
+    required this.reportTitle,
+    required this.name,
+    required this.ownerKey,
+    required this.ownerName,
+    required this.shared,
+    required this.settings,
+    required this.updatedAt,
+    this.deleted = false,
+  });
+
+  final String id;
+  final String reportTitle;
+  final String name;
+  final String ownerKey;
+  final String ownerName;
+  final bool shared;
+  final Map<String, dynamic> settings;
+  final DateTime updatedAt;
+  final bool deleted;
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'report_title': reportTitle,
+    'name': name,
+    'owner_key': ownerKey,
+    'owner_name': ownerName,
+    'shared': shared,
+    'settings': settings,
+    'updated_at': updatedAt.toUtc().toIso8601String(),
+    'deleted': deleted,
+  };
+
+  CrmReportTemplate copyWith({DateTime? updatedAt, bool? deleted}) {
+    return CrmReportTemplate(
+      id: id,
+      reportTitle: reportTitle,
+      name: name,
+      ownerKey: ownerKey,
+      ownerName: ownerName,
+      shared: shared,
+      settings: settings,
+      updatedAt: updatedAt ?? this.updatedAt,
+      deleted: deleted ?? this.deleted,
+    );
+  }
+
+  factory CrmReportTemplate.fromJson(Map<String, dynamic> value) {
+    final rawSettings = value['settings'];
+    return CrmReportTemplate(
+      id: _text(value['id']),
+      reportTitle: _text(value['report_title']),
+      name: _text(value['name']),
+      ownerKey: _text(value['owner_key']),
+      ownerName: _text(value['owner_name']),
+      shared: value['shared'] == true || value['shared'] == 1,
+      settings: rawSettings is Map
+          ? rawSettings.map((key, item) => MapEntry(key.toString(), item))
+          : <String, dynamic>{},
+      updatedAt: _date(value['updated_at']),
+      deleted: value['deleted'] == true || value['is_deleted'] == 1,
+    );
+  }
+}
+
 class SyncChange {
   const SyncChange({
     required this.entityType,

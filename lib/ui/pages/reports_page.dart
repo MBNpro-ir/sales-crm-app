@@ -22,6 +22,7 @@ class ReportsPage extends StatefulWidget {
 class _ReportsPageState extends State<ReportsPage> {
   final _customerFilter = TextEditingController();
   final _productFilter = TextEditingController();
+  final _gridController = CrmDataGridController();
 
   CrmStore get store => widget.store;
 
@@ -122,6 +123,7 @@ class _ReportsPageState extends State<ReportsPage> {
 
   Future<void> _print() => CrmReportService.printTable(
     context: context,
+    store: widget.store,
     title: 'گزارش جامع خرید و فروش',
     headers: _headers,
     rows: _exportRows,
@@ -169,8 +171,8 @@ class _ReportsPageState extends State<ReportsPage> {
           onReport: _print,
           onExportExcel: _export,
           onRefresh: widget.store.refresh,
-          onSearch: () => setState(() {}),
-          onAdvancedFilter: () => setState(() {}),
+          onSearch: _gridController.showSearch,
+          onAdvancedFilter: _gridController.showAdvancedFilter,
         ),
         const SizedBox(height: 18),
         Wrap(
@@ -266,6 +268,7 @@ class _ReportsPageState extends State<ReportsPage> {
               : CrmConfigurableDataTable<_UnifiedReportRow>(
                   tableId: 'unified_commercial_report',
                   rows: _reportRows,
+                  controller: _gridController,
                   initialSortColumnId: 'source',
                   columns: [
                     CrmTableColumn(

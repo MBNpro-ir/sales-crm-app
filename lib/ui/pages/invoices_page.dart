@@ -19,7 +19,9 @@ class InvoicesPage extends StatefulWidget {
 
 class _InvoicesPageState extends State<InvoicesPage> {
   final _search = TextEditingController();
+  final _gridController = CrmDataGridController();
   bool _issuedOnly = false;
+  List<_InvoiceEntry> _selectedEntries = const [];
 
   @override
   void dispose() {
@@ -147,6 +149,7 @@ class _InvoicesPageState extends State<InvoicesPage> {
 
   Future<void> _print(_InvoiceEntry entry) => CrmReportService.printDocument(
     context: context,
+    store: widget.store,
     title: 'فاکتور ${widget.direction}',
     number: entry.number,
     customer: entry.customer,
@@ -159,6 +162,7 @@ class _InvoicesPageState extends State<InvoicesPage> {
 
   Future<void> _printReport() => CrmReportService.printTable(
     context: context,
+    store: widget.store,
     title: 'گزارش فاکتورهای ${widget.direction}',
     headers: const ['منبع', 'شماره', 'طرف حساب', 'وضعیت', 'ردیف', 'مبلغ کل'],
     rows: _entries
@@ -203,10 +207,16 @@ class _InvoicesPageState extends State<InvoicesPage> {
         const SizedBox(height: 12),
         CrmPageToolbar(
           onNew: _newInvoice,
+          onEdit: _selectedEntries.length == 1
+              ? () => _edit(_selectedEntries.single)
+              : null,
+          onView: _selectedEntries.length == 1
+              ? () => _print(_selectedEntries.single)
+              : null,
           onReport: _printReport,
           onRefresh: widget.store.refresh,
-          onSearch: () => setState(() {}),
-          onAdvancedFilter: () => setState(() {}),
+          onSearch: _gridController.showSearch,
+          onAdvancedFilter: _gridController.showAdvancedFilter,
         ),
         const SizedBox(height: 18),
         Wrap(
@@ -290,6 +300,10 @@ class _InvoicesPageState extends State<InvoicesPage> {
               : CrmConfigurableDataTable<_InvoiceEntry>(
                   tableId: 'invoices_${widget.direction}',
                   rows: entries,
+                  controller: _gridController,
+                  rowKey: (entry) => '${entry.sourceLabel}:${entry.id}',
+                  onSelectionChanged: (items) =>
+                      setState(() => _selectedEntries = items),
                   initialSortColumnId: 'updated',
                   initialSortAscending: false,
                   columns: [

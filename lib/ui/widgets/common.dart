@@ -675,6 +675,143 @@ class CrmTableColumn<T> {
   final double maxWidth;
 }
 
+/// The single visual table surface used by both operational grids and report
+/// previews. Filtering, paging and persistence live in their respective
+/// controllers, while sizing, sorting, selection and cell rendering stay
+/// identical everywhere in the application.
+class CrmDataGridSurface<T> extends StatelessWidget {
+  const CrmDataGridSurface({
+    super.key,
+    required this.columns,
+    required this.rows,
+    this.widths = const {},
+    this.frozenColumns = const {},
+    this.rowOffset = 0,
+    this.showRowNumbers = true,
+    this.enableSelection = false,
+    this.isSelected,
+    this.onSelectionChanged,
+    this.sortColumnId,
+    this.sortAscending = true,
+    this.onSort,
+    this.rowColor,
+  });
+
+  final List<CrmTableColumn<T>> columns;
+  final List<T> rows;
+  final Map<String, double> widths;
+  final Set<String> frozenColumns;
+  final int rowOffset;
+  final bool showRowNumbers;
+  final bool enableSelection;
+  final bool Function(T item)? isSelected;
+  final void Function(T item, bool selected)? onSelectionChanged;
+  final String? sortColumnId;
+  final bool sortAscending;
+  final void Function(String columnId, bool ascending)? onSort;
+  final Color? Function(T item)? rowColor;
+
+  @override
+  Widget build(BuildContext context) {
+    final localSortIndex = sortColumnId == null
+        ? -1
+        : columns.indexWhere((column) => column.id == sortColumnId);
+    final sortIndex = localSortIndex < 0
+        ? null
+        : localSortIndex + (showRowNumbers ? 1 : 0);
+    final scheme = Theme.of(context).colorScheme;
+    return DataTable(
+      showCheckboxColumn: enableSelection,
+      horizontalMargin: 12,
+      columnSpacing: 12,
+      dataRowMinHeight: 56,
+      dataRowMaxHeight: 56,
+      headingRowHeight: 56,
+      headingRowColor: WidgetStatePropertyAll(scheme.surfaceContainerHighest),
+      sortColumnIndex: sortIndex,
+      sortAscending: sortAscending,
+      columns: [
+        if (showRowNumbers)
+          const DataColumn(
+            label: SizedBox(width: 42, child: Text('ردیف')),
+            numeric: true,
+          ),
+        ...columns.map((column) {
+          final width = widths[column.id] ?? column.initialWidth;
+          return DataColumn(
+            label: SizedBox(
+              width: width,
+              child: Row(
+                children: [
+                  if (frozenColumns.contains(column.id)) ...[
+                    const Icon(Icons.push_pin_rounded, size: 14),
+                    const SizedBox(width: 4),
+                  ],
+                  Expanded(
+                    child: Text(column.label, overflow: TextOverflow.ellipsis),
+                  ),
+                ],
+              ),
+            ),
+            numeric: column.numeric,
+            onSort:
+                onSort == null ||
+                    (column.sortValue == null && !column.filterable)
+                ? null
+                : (_, ascending) => onSort!(column.id, ascending),
+          );
+        }),
+      ],
+      rows: rows.asMap().entries.map((entry) {
+        final item = entry.value;
+        final selected = isSelected?.call(item) ?? false;
+        final color = rowColor?.call(item);
+        return DataRow(
+          selected: selected,
+          color: color == null ? null : WidgetStatePropertyAll(color),
+          onSelectChanged: enableSelection && onSelectionChanged != null
+              ? (value) => onSelectionChanged!(item, value == true)
+              : null,
+          cells: [
+            if (showRowNumbers)
+              DataCell(
+                SizedBox(
+                  width: 42,
+                  child: Text(
+                    formatPersianInteger(rowOffset + entry.key + 1),
+                    textAlign: TextAlign.center,
+                  ),
+                ),
+              ),
+            ...columns.map((column) {
+              final width = widths[column.id] ?? column.initialWidth;
+              return DataCell(
+                SizedBox(
+                  width: width,
+                  child: ClipRect(
+                    child: Align(
+                      alignment: column.numeric
+                          ? AlignmentDirectional.centerEnd
+                          : AlignmentDirectional.centerStart,
+                      child:
+                          column.cell?.call(context, item) ??
+                          Text(
+                            column.value(item),
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                    ),
+                  ),
+                ),
+              );
+            }),
+          ],
+        );
+      }).toList(),
+    );
+  }
+}
+
 class _CrmSortSpec {
   const _CrmSortSpec(this.columnId, this.ascending);
 
@@ -682,6 +819,27 @@ class _CrmSortSpec {
   final bool ascending;
 
   Map<String, dynamic> toJson() => {'column': columnId, 'ascending': ascending};
+}
+
+class CrmDataGridController {
+  VoidCallback? _openSearch;
+  VoidCallback? _openAdvancedFilter;
+
+  void showSearch() => _openSearch?.call();
+  void showAdvancedFilter() => _openAdvancedFilter?.call();
+
+  void _bind({
+    required VoidCallback openSearch,
+    required VoidCallback openAdvancedFilter,
+  }) {
+    _openSearch = openSearch;
+    _openAdvancedFilter = openAdvancedFilter;
+  }
+
+  void _unbind() {
+    _openSearch = null;
+    _openAdvancedFilter = null;
+  }
 }
 
 /// A reusable Windows-friendly table whose column order and visibility are
@@ -700,6 +858,8 @@ class CrmConfigurableDataTable<T> extends StatefulWidget {
     this.enableSelection = true,
     this.rowKey,
     this.rowColor,
+    this.onSelectionChanged,
+    this.controller,
   });
 
   final String tableId;
@@ -712,6 +872,8 @@ class CrmConfigurableDataTable<T> extends StatefulWidget {
   final bool enableSelection;
   final Object Function(T item)? rowKey;
   final Color? Function(T item)? rowColor;
+  final ValueChanged<List<T>>? onSelectionChanged;
+  final CrmDataGridController? controller;
 
   @override
   State<CrmConfigurableDataTable<T>> createState() =>
@@ -756,12 +918,24 @@ class _CrmConfigurableDataTableState<T>
       _widths[column.id] = column.initialWidth;
     }
     _syncFilterControllers();
+    _bindController();
     _loadLayout();
+  }
+
+  void _bindController() {
+    widget.controller?._bind(
+      openSearch: () => unawaited(_openSearchDialog()),
+      openAdvancedFilter: () => unawaited(_configure()),
+    );
   }
 
   @override
   void didUpdateWidget(covariant CrmConfigurableDataTable<T> oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.controller != widget.controller) {
+      oldWidget.controller?._unbind();
+      _bindController();
+    }
     final ids = widget.columns.map((column) => column.id).toSet();
     _order = [
       ..._order.where(ids.contains),
@@ -785,6 +959,7 @@ class _CrmConfigurableDataTableState<T>
 
   @override
   void dispose() {
+    widget.controller?._unbind();
     _globalSearch.dispose();
     for (final controller in _filters.values) {
       controller.dispose();
@@ -1100,7 +1275,53 @@ class _CrmConfigurableDataTableState<T>
     }
   }
 
+  Future<void> _openSearchDialog() async {
+    final controller = TextEditingController(text: _globalSearch.text);
+    final value = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('جستجو داخل جدول'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          decoration: const InputDecoration(
+            prefixIcon: Icon(Icons.search_rounded),
+            labelText: 'عبارت جستجو',
+          ),
+          onSubmitted: (value) => Navigator.pop(context, value),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, ''),
+            child: const Text('پاک‌کردن'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('انصراف'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, controller.text),
+            child: const Text('اعمال'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (value == null || !mounted) return;
+    setState(() {
+      _globalSearch.text = value;
+      _page = 0;
+    });
+    await _saveLayout();
+  }
+
   Object _keyFor(T item) => widget.rowKey?.call(item) ?? identityHashCode(item);
+
+  void _notifySelection() {
+    widget.onSelectionChanged?.call(
+      widget.rows.where((item) => _selected.contains(_keyFor(item))).toList(),
+    );
+  }
 
   Future<void> _configureSorts() async {
     final selected = <String, bool>{
@@ -1323,6 +1544,7 @@ class _CrmConfigurableDataTableState<T>
         controller.clear();
       }
     });
+    _notifySelection();
   }
 
   void _clearFilters() {
@@ -1356,117 +1578,40 @@ class _CrmConfigurableDataTableState<T>
     required bool includeRowNumbers,
     required bool includeSelection,
   }) {
-    final primarySort = _sorts.firstOrNull;
-    final localSortIndex = primarySort == null
-        ? -1
-        : columns.indexWhere((column) => column.id == primarySort.columnId);
     final hasRowNumbers =
         includeRowNumbers &&
         widget.showRowNumbers &&
         !widget.columns.any((column) => column.id == 'row');
-    final sortIndex = localSortIndex < 0
-        ? null
-        : localSortIndex + (hasRowNumbers ? 1 : 0);
-    final scheme = Theme.of(context).colorScheme;
-    return DataTable(
-      showCheckboxColumn: includeSelection && widget.enableSelection,
-      horizontalMargin: 12,
-      columnSpacing: 12,
-      dataRowMinHeight: 56,
-      dataRowMaxHeight: 56,
-      headingRowHeight: 56,
-      headingRowColor: WidgetStatePropertyAll(scheme.surfaceContainerHighest),
-      sortColumnIndex: sortIndex,
-      sortAscending: primarySort?.ascending ?? true,
-      columns: [
-        if (hasRowNumbers)
-          const DataColumn(
-            label: SizedBox(width: 42, child: Text('ردیف')),
-            numeric: true,
-          ),
-        ...columns.map((column) {
-          final width = _widths[column.id] ?? column.initialWidth;
-          return DataColumn(
-            label: SizedBox(
-              width: width,
-              child: Row(
-                children: [
-                  if (_frozen.contains(column.id)) ...[
-                    const Icon(Icons.push_pin_rounded, size: 14),
-                    const SizedBox(width: 4),
-                  ],
-                  Expanded(
-                    child: Text(column.label, overflow: TextOverflow.ellipsis),
-                  ),
-                ],
-              ),
-            ),
-            numeric: column.numeric,
-            onSort: column.sortValue == null && !column.filterable
-                ? null
-                : (_, ascending) {
-                    setState(() {
-                      _sorts = [_CrmSortSpec(column.id, ascending)];
-                      _sortColumnId = column.id;
-                      _sortAscending = ascending;
-                      _page = 0;
-                    });
-                    unawaited(_saveLayout());
-                  },
-          );
-        }),
-      ],
-      rows: rows.asMap().entries.map((entry) {
-        final item = entry.value;
-        final key = _keyFor(item);
-        final selected = _selected.contains(key);
-        final color = widget.rowColor?.call(item) ?? _defaultRowColor(item);
-        return DataRow(
-          selected: selected,
-          color: color == null ? null : WidgetStatePropertyAll(color),
-          onSelectChanged: includeSelection && widget.enableSelection
-              ? (value) => setState(
-                  () => value == true
-                      ? _selected.add(key)
-                      : _selected.remove(key),
-                )
-              : null,
-          cells: [
-            if (hasRowNumbers)
-              DataCell(
-                SizedBox(
-                  width: 42,
-                  child: Text(
-                    formatPersianInteger(rowOffset + entry.key + 1),
-                    textAlign: TextAlign.center,
-                  ),
-                ),
-              ),
-            ...columns.map((column) {
-              final width = _widths[column.id] ?? column.initialWidth;
-              return DataCell(
-                SizedBox(
-                  width: width,
-                  child: ClipRect(
-                    child: Align(
-                      alignment: column.numeric
-                          ? AlignmentDirectional.centerEnd
-                          : AlignmentDirectional.centerStart,
-                      child:
-                          column.cell?.call(context, item) ??
-                          Text(
-                            column.value(item),
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                    ),
-                  ),
-                ),
-              );
-            }),
-          ],
+    final primarySort = _sorts.firstOrNull;
+    return CrmDataGridSurface<T>(
+      columns: columns,
+      rows: rows,
+      widths: _widths,
+      frozenColumns: _frozen,
+      rowOffset: rowOffset,
+      showRowNumbers: hasRowNumbers,
+      enableSelection: includeSelection && widget.enableSelection,
+      isSelected: (item) => _selected.contains(_keyFor(item)),
+      onSelectionChanged: (item, selected) {
+        setState(
+          () => selected
+              ? _selected.add(_keyFor(item))
+              : _selected.remove(_keyFor(item)),
         );
-      }).toList(),
+        _notifySelection();
+      },
+      sortColumnId: primarySort?.columnId,
+      sortAscending: primarySort?.ascending ?? true,
+      onSort: (columnId, ascending) {
+        setState(() {
+          _sorts = [_CrmSortSpec(columnId, ascending)];
+          _sortColumnId = columnId;
+          _sortAscending = ascending;
+          _page = 0;
+        });
+        unawaited(_saveLayout());
+      },
+      rowColor: (item) => widget.rowColor?.call(item) ?? _defaultRowColor(item),
     );
   }
 
@@ -1582,13 +1727,16 @@ class _CrmConfigurableDataTableState<T>
                   selected: allSelected,
                   label: const Text('انتخاب همه رکوردها'),
                   avatar: const Icon(Icons.select_all_rounded, size: 18),
-                  onSelected: (value) => setState(() {
-                    if (value) {
-                      _selected.addAll(rows.map(_keyFor));
-                    } else {
-                      _selected.removeAll(rows.map(_keyFor));
-                    }
-                  }),
+                  onSelected: (value) {
+                    setState(() {
+                      if (value) {
+                        _selected.addAll(rows.map(_keyFor));
+                      } else {
+                        _selected.removeAll(rows.map(_keyFor));
+                      }
+                    });
+                    _notifySelection();
+                  },
                 ),
               OutlinedButton.icon(
                 onPressed: rows.isEmpty

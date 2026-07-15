@@ -156,4 +156,26 @@ void main() {
     expect(entry.newValue['status'], 'غیرفعال');
     expect(entry.toJson()['user_name'], 'مدیر');
   });
+
+  test('shared report templates preserve owner and grid settings', () {
+    final template = CrmReportTemplate.fromJson({
+      'id': 'template-1',
+      'report_title': 'گزارش مشتریان',
+      'name': 'قالب مدیریت',
+      'owner_key': 'org-1::manager',
+      'owner_name': 'مدیر',
+      'shared': true,
+      'settings': {
+        'order': [2, 0, 1],
+        'visible': [0, 2],
+        'level': 'معین',
+      },
+      'updated_at': '2026-07-15T09:30:00.000Z',
+    });
+
+    expect(template.shared, isTrue);
+    expect(template.ownerKey, 'org-1::manager');
+    expect(template.settings['level'], 'معین');
+    expect(template.toJson()['report_title'], 'گزارش مشتریان');
+  });
 }

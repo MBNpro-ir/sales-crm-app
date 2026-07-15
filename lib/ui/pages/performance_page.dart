@@ -13,6 +13,7 @@ class PerformancePage extends StatelessWidget {
     final owners = _owners();
     return CrmReportService.printTable(
       context: context,
+      store: store,
       title: 'گزارش عملکرد کارشناسان فروش',
       headers: const [
         'کارشناس',

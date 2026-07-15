@@ -28,6 +28,8 @@ class ProductsPage extends StatefulWidget {
 
 class _ProductsPageState extends State<ProductsPage> {
   final _search = TextEditingController();
+  final _gridController = CrmDataGridController();
+  List<CrmProduct> _selectedProducts = const [];
 
   @override
   void dispose() {
@@ -92,6 +94,7 @@ class _ProductsPageState extends State<ProductsPage> {
 
   Future<void> _printReport() => CrmReportService.printTable(
     context: context,
+    store: widget.store,
     title: 'گزارش کالا و موجودی بر اساس گروه',
     headers: const [
       'گروه',
@@ -115,11 +118,13 @@ class _ProductsPageState extends State<ProductsPage> {
           ],
         )
         .toList(),
+    rowDates: widget.store.products.map((item) => item.updatedAt).toList(),
     numericColumns: const {4, 5},
   );
 
   Future<void> _viewProduct(CrmProduct product) => CrmReportService.printTable(
     context: context,
+    store: widget.store,
     title: 'مشاهده کالا / خدمت ${product.name}',
     headers: const [
       'نام',
@@ -145,6 +150,7 @@ class _ProductsPageState extends State<ProductsPage> {
         product.description,
       ],
     ],
+    rowDates: [product.updatedAt],
     numericColumns: const {4, 5, 6},
   );
 
@@ -191,11 +197,20 @@ class _ProductsPageState extends State<ProductsPage> {
         const SizedBox(height: 12),
         CrmPageToolbar(
           onNew: () => _openEditor(),
+          onEdit: _selectedProducts.length == 1
+              ? () => _openEditor(_selectedProducts.single)
+              : null,
+          onDelete: _selectedProducts.length == 1
+              ? () => _delete(_selectedProducts.single)
+              : null,
+          onView: _selectedProducts.length == 1
+              ? () => _viewProduct(_selectedProducts.single)
+              : null,
           onReport: _printReport,
           onTools: _addCategory,
           onRefresh: widget.store.refresh,
-          onSearch: () => setState(() {}),
-          onAdvancedFilter: () => setState(() {}),
+          onSearch: _gridController.showSearch,
+          onAdvancedFilter: _gridController.showAdvancedFilter,
         ),
         const SizedBox(height: 18),
         Wrap(
@@ -309,6 +324,10 @@ class _ProductsPageState extends State<ProductsPage> {
               : CrmConfigurableDataTable<CrmProduct>(
                   tableId: 'products',
                   rows: products,
+                  controller: _gridController,
+                  rowKey: (item) => item.id,
+                  onSelectionChanged: (items) =>
+                      setState(() => _selectedProducts = items),
                   initialSortColumnId: 'name',
                   columns: [
                     CrmTableColumn(

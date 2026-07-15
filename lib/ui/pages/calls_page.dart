@@ -48,12 +48,14 @@ class CallsPage extends StatefulWidget {
 
 class _CallsPageState extends State<CallsPage> {
   final _search = TextEditingController();
+  final _gridController = CrmDataGridController();
   String? _resultFilter;
   String? _typeFilter;
   String? _tradeFilter;
   String? _activityFilter;
   String? _priorityFilter;
   bool _vipOnly = false;
+  List<CrmCall> _selectedCalls = const [];
 
   @override
   void initState() {
@@ -202,6 +204,7 @@ class _CallsPageState extends State<CallsPage> {
     }).toList();
     return CrmReportService.printTable(
       context: context,
+      store: widget.store,
       title: 'گزارش تماس‌ها و جلسات',
       subtitle:
           'گزارش عملکرد قابل تنظیم بر اساس بازه تاریخ، مشتری، کالا، شهر و استان',
@@ -289,7 +292,11 @@ class _CallsPageState extends State<CallsPage> {
     }
   }
 
-  Future<void> _newDocument(CrmCall call, DocumentPageMode mode) async {
+  Future<void> _newDocument(
+    CrmCall call,
+    DocumentPageMode mode, {
+    bool issueInvoice = false,
+  }) async {
     final saved = await showDialog<bool>(
       context: context,
       builder: (context) => DocumentEditorDialog(
@@ -297,12 +304,15 @@ class _CallsPageState extends State<CallsPage> {
         mode: mode,
         initialCustomerId: call.customerId,
         initialDirection: call.tradeType == 'خرید' ? 'خرید' : 'فروش',
+        initialStatus: issueInvoice ? 'فاکتور صادر شد' : null,
       ),
     );
     if (mounted && saved == true) {
       showCrmNotice(
         context,
-        mode == DocumentPageMode.quote
+        issueInvoice
+            ? 'فاکتور از روی تماس صادر شد.'
+            : mode == DocumentPageMode.quote
             ? 'پیش‌فاکتور از روی تماس ثبت شد.'
             : 'سفارش از روی تماس ثبت شد.',
         type: CrmNoticeType.success,
@@ -314,6 +324,7 @@ class _CallsPageState extends State<CallsPage> {
     final customer = _customerFor(call);
     return CrmReportService.printTable(
       context: context,
+      store: widget.store,
       title: 'مشاهده تماس ${call.subject}',
       subtitle: 'پیش‌نمایش کامل رکورد تماس پیش از چاپ',
       headers: const [
@@ -415,12 +426,21 @@ class _CallsPageState extends State<CallsPage> {
         const SizedBox(height: 12),
         CrmPageToolbar(
           onNew: () => _openEditor(),
+          onEdit: _selectedCalls.length == 1
+              ? () => _openEditor(_selectedCalls.single)
+              : null,
+          onDelete: _selectedCalls.length == 1
+              ? () => _delete(_selectedCalls.single)
+              : null,
+          onView: _selectedCalls.length == 1
+              ? () => _viewCall(_selectedCalls.single)
+              : null,
           onReport: _printCalls,
           onExportExcel: _exportExcel,
           onImportExcel: _importExcel,
           onRefresh: widget.store.refresh,
-          onSearch: () => setState(() {}),
-          onAdvancedFilter: () => setState(() {}),
+          onSearch: _gridController.showSearch,
+          onAdvancedFilter: _gridController.showAdvancedFilter,
         ),
         const SizedBox(height: 18),
         Wrap(
@@ -594,6 +614,10 @@ class _CallsPageState extends State<CallsPage> {
               : CrmConfigurableDataTable<CrmCall>(
                   tableId: 'calls',
                   rows: rows,
+                  controller: _gridController,
+                  rowKey: (item) => item.id,
+                  onSelectionChanged: (items) =>
+                      setState(() => _selectedCalls = items),
                   initialSortColumnId: 'call_date',
                   initialSortAscending: false,
                   columns: [
@@ -649,6 +673,18 @@ class _CallsPageState extends State<CallsPage> {
                       label: 'کالا / خدمت',
                       value: (item) =>
                           item.productName.isEmpty ? '—' : item.productName,
+                    ),
+                    CrmTableColumn(
+                      id: 'province',
+                      label: 'استان',
+                      value: (item) => _customerFor(item)?.province ?? '',
+                      initiallyVisible: false,
+                    ),
+                    CrmTableColumn(
+                      id: 'city',
+                      label: 'شهر',
+                      value: (item) => _customerFor(item)?.city ?? '',
+                      initiallyVisible: false,
                     ),
                     CrmTableColumn(
                       id: 'quantity',
@@ -713,6 +749,12 @@ class _CallsPageState extends State<CallsPage> {
                       numeric: true,
                     ),
                     CrmTableColumn(
+                      id: 'notes',
+                      label: 'شرح تماس',
+                      value: (item) => item.notes,
+                      initiallyVisible: false,
+                    ),
+                    CrmTableColumn(
                       id: 'actions',
                       label: 'عملیات',
                       value: (_) => '',
@@ -731,7 +773,11 @@ class _CallsPageState extends State<CallsPage> {
                             _newDocument(call, DocumentPageMode.order);
                           }
                           if (value == 'invoice') {
-                            _newDocument(call, DocumentPageMode.order);
+                            _newDocument(
+                              call,
+                              DocumentPageMode.order,
+                              issueInvoice: true,
+                            );
                           }
                           if (value == 'attachments') {
                             showCrmAttachmentManager(
