@@ -835,9 +835,35 @@ class CrmStore extends ChangeNotifier {
       _database.exportWorkspaceBackup();
 
   Future<void> restoreWorkspaceBackup(Map<String, dynamic> backup) async {
+    final before = <String, dynamic>{
+      'customers': _customers.length,
+      'calls': _calls.length,
+      'products': _products.length,
+      'opportunities': _opportunities.length,
+      'tasks': _tasks.length,
+      'quotes': _quotes.length,
+      'orders': _orders.length,
+      'attachments': _attachments.length,
+    };
     await _database.restoreWorkspaceBackup(backup);
     await refresh();
-    if (_online && hasSession) await sync(silent: true);
+    await _recordAudit(
+      entityType: 'workspace',
+      entityId: _organizationId ?? 'offline',
+      action: 'بازیابی نسخه پشتیبان',
+      oldValue: before,
+      newValue: {
+        'customers': _customers.length,
+        'calls': _calls.length,
+        'products': _products.length,
+        'opportunities': _opportunities.length,
+        'tasks': _tasks.length,
+        'quotes': _quotes.length,
+        'orders': _orders.length,
+        'attachments': _attachments.length,
+      },
+    );
+    await _afterLocalMutation();
   }
 
   Future<void> saveCall({

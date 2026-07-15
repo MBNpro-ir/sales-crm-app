@@ -4,6 +4,7 @@ import '../../core/crm_store.dart';
 import '../../core/models.dart';
 import '../../core/report_service.dart';
 import '../widgets/common.dart';
+import '../widgets/entity_tools.dart';
 
 class ReportsPage extends StatefulWidget {
   const ReportsPage({
@@ -39,6 +40,9 @@ class _ReportsPageState extends State<ReportsPage> {
     final rows = <_UnifiedReportRow>[
       ...store.calls.map(
         (item) => _UnifiedReportRow(
+          entityType: 'call',
+          auditEntityType: 'call',
+          entityId: item.id,
           source: 'تماس',
           number: compactDate(item.callAt),
           customer: item.customerName,
@@ -51,6 +55,9 @@ class _ReportsPageState extends State<ReportsPage> {
       ),
       ...store.quotes.map(
         (item) => _UnifiedReportRow(
+          entityType: 'quote',
+          auditEntityType: 'quote',
+          entityId: item.id,
           source: 'پیش‌فاکتور',
           number: item.quoteNumber,
           customer: item.customerName,
@@ -63,6 +70,9 @@ class _ReportsPageState extends State<ReportsPage> {
       ),
       ...store.orders.map(
         (item) => _UnifiedReportRow(
+          entityType: item.status == 'فاکتور صادر شد' ? 'invoice' : 'order',
+          auditEntityType: 'order',
+          entityId: item.id,
           source: item.status == 'فاکتور صادر شد' ? 'فاکتور' : 'سفارش',
           number: item.orderNumber,
           customer: item.customerName,
@@ -129,6 +139,56 @@ class _ReportsPageState extends State<ReportsPage> {
     rows: _exportRows,
     rowDates: _reportRows.map((item) => item.date).toList(),
     numericColumns: const {6},
+  );
+
+  Future<void> _viewRow(_UnifiedReportRow item) => CrmReportService.printTable(
+    context: context,
+    store: widget.store,
+    title: 'نمایش ${item.source} ${item.number}',
+    headers: _headers,
+    rows: [
+      [
+        item.source,
+        item.number,
+        item.customer,
+        item.product,
+        item.direction,
+        item.status,
+        item.amount,
+      ],
+    ],
+    rowDates: [item.date],
+    numericColumns: const {6},
+  );
+
+  Future<void> _viewCall(CrmCall item) => CrmReportService.printTable(
+    context: context,
+    store: widget.store,
+    title: 'نمایش تماس ${item.customerName}',
+    headers: const [
+      'مشتری',
+      'موضوع',
+      'نوع',
+      'نتیجه',
+      'خرید / فروش',
+      'مبلغ',
+      'تاریخ',
+      'یادداشت',
+    ],
+    rows: [
+      [
+        item.customerName,
+        item.subject,
+        item.type,
+        item.status,
+        item.tradeType,
+        item.totalAmount,
+        formatJalaliDate(item.callAt, includeTime: true),
+        item.notes,
+      ],
+    ],
+    rowDates: [item.callAt],
+    numericColumns: const {5},
   );
 
   @override
@@ -309,6 +369,54 @@ class _ReportsPageState extends State<ReportsPage> {
                       sortValue: (item) => item.amount,
                       numeric: true,
                     ),
+                    CrmTableColumn(
+                      id: 'actions',
+                      label: 'عملیات',
+                      value: (_) => '',
+                      canHide: false,
+                      filterable: false,
+                      cell: (context, item) => PopupMenuButton<String>(
+                        tooltip: 'عملیات ردیف گزارش',
+                        onSelected: (value) {
+                          if (value == 'view' || value == 'print') {
+                            _viewRow(item);
+                          }
+                          if (value == 'attachments') {
+                            showCrmAttachmentManager(
+                              context,
+                              store: store,
+                              entityType: item.entityType,
+                              entityId: item.entityId,
+                              title: '${item.source} ${item.number}',
+                            );
+                          }
+                          if (value == 'history') {
+                            showCrmAuditLog(
+                              context,
+                              store: store,
+                              entityType: item.auditEntityType,
+                              entityId: item.entityId,
+                              title: '${item.source} ${item.number}',
+                            );
+                          }
+                        },
+                        itemBuilder: (context) => const [
+                          PopupMenuItem(value: 'view', child: Text('مشاهده')),
+                          PopupMenuItem(
+                            value: 'print',
+                            child: Text('گزارش و چاپ'),
+                          ),
+                          PopupMenuItem(
+                            value: 'attachments',
+                            child: Text('فایل‌های پیوست'),
+                          ),
+                          PopupMenuItem(
+                            value: 'history',
+                            child: Text('تاریخچه'),
+                          ),
+                        ],
+                      ),
+                    ),
                   ],
                 ),
         ),
@@ -449,6 +557,54 @@ class _ReportsPageState extends State<ReportsPage> {
                       sortValue: (call) => call.callAt,
                       initiallyVisible: false,
                     ),
+                    CrmTableColumn(
+                      id: 'actions',
+                      label: 'عملیات',
+                      value: (_) => '',
+                      canHide: false,
+                      filterable: false,
+                      cell: (context, call) => PopupMenuButton<String>(
+                        tooltip: 'عملیات تماس',
+                        onSelected: (value) {
+                          if (value == 'view' || value == 'print') {
+                            _viewCall(call);
+                          }
+                          if (value == 'attachments') {
+                            showCrmAttachmentManager(
+                              context,
+                              store: store,
+                              entityType: 'call',
+                              entityId: call.id,
+                              title: call.subject,
+                            );
+                          }
+                          if (value == 'history') {
+                            showCrmAuditLog(
+                              context,
+                              store: store,
+                              entityType: 'call',
+                              entityId: call.id,
+                              title: call.subject,
+                            );
+                          }
+                        },
+                        itemBuilder: (context) => const [
+                          PopupMenuItem(value: 'view', child: Text('مشاهده')),
+                          PopupMenuItem(
+                            value: 'print',
+                            child: Text('گزارش و چاپ'),
+                          ),
+                          PopupMenuItem(
+                            value: 'attachments',
+                            child: Text('فایل‌های پیوست'),
+                          ),
+                          PopupMenuItem(
+                            value: 'history',
+                            child: Text('تاریخچه'),
+                          ),
+                        ],
+                      ),
+                    ),
                   ],
                 ),
         ),
@@ -459,6 +615,9 @@ class _ReportsPageState extends State<ReportsPage> {
 
 class _UnifiedReportRow {
   const _UnifiedReportRow({
+    required this.entityType,
+    required this.auditEntityType,
+    required this.entityId,
     required this.source,
     required this.number,
     required this.customer,
@@ -469,6 +628,9 @@ class _UnifiedReportRow {
     required this.date,
   });
 
+  final String entityType;
+  final String auditEntityType;
+  final String entityId;
   final String source;
   final String number;
   final String customer;

@@ -9,46 +9,62 @@ class PerformancePage extends StatelessWidget {
 
   final CrmStore store;
 
-  Future<void> _printPerformance(BuildContext context) {
-    final owners = _owners();
+  List<_PerformanceEvent> _events([String? selectedOwner]) {
+    final events = <_PerformanceEvent>[
+      ...store.opportunities.map(
+        (item) => _PerformanceEvent(
+          owner: item.ownerName,
+          type: 'فرصت',
+          description: item.title,
+          status: item.stage,
+          amount: item.amount,
+          date: item.updatedAt,
+        ),
+      ),
+      ...store.tasks.map(
+        (item) => _PerformanceEvent(
+          owner: item.ownerName,
+          type: 'وظیفه',
+          description: item.title,
+          status: item.status,
+          amount: 0,
+          date: item.updatedAt,
+        ),
+      ),
+    ].where((item) => item.owner.trim().isNotEmpty).toList();
+    if (selectedOwner == null) return events;
+    return events.where((item) => item.owner == selectedOwner).toList();
+  }
+
+  Future<void> _printPerformance(BuildContext context, {String? owner}) {
+    final events = _events(owner);
     return CrmReportService.printTable(
       context: context,
       store: store,
-      title: 'گزارش عملکرد کارشناسان فروش',
-      headers: const [
-        'کارشناس',
-        'فرصت باز',
-        'پایپ‌لاین وزنی',
-        'وظایف',
-        'سفارش فروش',
-      ],
-      rows: owners
+      title: owner == null
+          ? 'گزارش عملکرد کارشناسان فروش'
+          : 'گزارش عملکرد $owner',
+      headers: const ['کارشناس', 'نوع رویداد', 'شرح', 'وضعیت', 'مبلغ', 'تاریخ'],
+      rows: events
           .map(
-            (owner) => [
-              owner,
-              store.opportunities
-                  .where(
-                    (item) =>
-                        item.ownerName == owner &&
-                        !{'برنده شده', 'از دست رفته'}.contains(item.stage),
-                  )
-                  .length,
-              store.opportunities
-                  .where((item) => item.ownerName == owner)
-                  .fold<int>(0, (sum, item) => sum + item.weightedAmount),
-              store.tasks.where((item) => item.ownerName == owner).length,
-              store.orders
-                  .where((item) => item.direction == 'فروش')
-                  .fold<int>(0, (sum, item) => sum + item.totalAmount),
+            (event) => [
+              event.owner,
+              event.type,
+              event.description,
+              event.status,
+              event.amount,
+              compactDate(event.date),
             ],
           )
           .toList(),
-      numericColumns: const {1, 2, 3, 4},
+      rowDates: events.map((item) => item.date).toList(),
+      numericColumns: const {4},
     );
   }
 
   @override
   Widget build(BuildContext context) {
+    final gridController = CrmDataGridController();
     final owners = _owners();
     final totalOrders = store.orders
         .where((order) => order.direction == 'فروش')
@@ -65,6 +81,8 @@ class PerformancePage extends StatelessWidget {
         CrmPageToolbar(
           onReport: () => _printPerformance(context),
           onRefresh: store.refresh,
+          onSearch: gridController.showSearch,
+          onAdvancedFilter: gridController.showAdvancedFilter,
         ),
         const SizedBox(height: 18),
         Wrap(
@@ -124,6 +142,7 @@ class PerformancePage extends StatelessWidget {
               : CrmConfigurableDataTable<String>(
                   tableId: 'sales_performance',
                   rows: owners,
+                  controller: gridController,
                   initialSortColumnId: 'owner',
                   columns: [
                     CrmTableColumn(
@@ -204,6 +223,31 @@ class PerformancePage extends StatelessWidget {
                           .length,
                       numeric: true,
                     ),
+                    CrmTableColumn(
+                      id: 'actions',
+                      label: 'عملیات',
+                      value: (_) => '',
+                      canHide: false,
+                      filterable: false,
+                      cell: (context, owner) => PopupMenuButton<String>(
+                        tooltip: 'عملیات گزارش کارشناس',
+                        onSelected: (value) {
+                          if (value == 'view' || value == 'print') {
+                            _printPerformance(context, owner: owner);
+                          }
+                        },
+                        itemBuilder: (context) => const [
+                          PopupMenuItem(
+                            value: 'view',
+                            child: Text('مشاهده عملکرد'),
+                          ),
+                          PopupMenuItem(
+                            value: 'print',
+                            child: Text('گزارش و چاپ'),
+                          ),
+                        ],
+                      ),
+                    ),
                   ],
                 ),
         ),
@@ -248,6 +292,24 @@ class PerformancePage extends StatelessWidget {
     }
     return owners.toList()..sort();
   }
+}
+
+class _PerformanceEvent {
+  const _PerformanceEvent({
+    required this.owner,
+    required this.type,
+    required this.description,
+    required this.status,
+    required this.amount,
+    required this.date,
+  });
+
+  final String owner;
+  final String type;
+  final String description;
+  final String status;
+  final int amount;
+  final DateTime date;
 }
 
 class _SummaryLine extends StatelessWidget {
